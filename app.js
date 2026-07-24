@@ -435,12 +435,15 @@ function calibrate() {
 /**
  * 秒数を「m:ss」形式の文字列にします。
  *
+ * 小数や負の値が渡っても表示が崩れないよう、整数に丸めて 0 で下げ止めます。
+ *
  * @param {number} totalSec 変換する秒数
  * @returns {string} 「m:ss」形式の文字列
  */
 function formatTime(totalSec) {
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
+  const safeSec = Math.max(0, Math.round(totalSec));
+  const min = Math.floor(safeSec / 60);
+  const sec = safeSec % 60;
   return `${min}:${String(sec).padStart(2, "0")}`;
 }
 
