@@ -1,0 +1,622 @@
+/**
+ * OMETSUKE — カメラで作業姿勢を見守るポモドーロ アプリのプロトタイプです。
+ *
+ * MediaPipe Face Landmarker をブラウザ内 (WASM) で動かし、顔の有無と顔の向きから
+ * 「作業ゾーンにいるか」を毎秒判定します。映像は端末外へ一切送信しません。
+ * 集中の中身そのものは測れないため、あくまで「作業姿勢の維持度」を測る設計です。
+ */
+
+import {
+  FaceLandmarker,
+  FilesetResolver,
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+/** 動作パラメータをまとめた設定です。しきい値の調整はここだけで済むようにしています。 */
+const CONFIG = {
+  // 基準姿勢からのずれの許容量 (度) です。これを超えると「よそ見」とみなします。
+  yawToleranceDeg: 25,
+  pitchToleranceDeg: 20,
+  // ゾーン外が続いてもすぐ減点しない猶予 (ミリ秒) です。一瞬の首振りで減点しないためです。
+  graceMs: 3000,
+  // 検知結果がこの時間より古い場合は「検知が止まっている」= ゾーン外として扱います。
+  // タブを裏に回すと検知ループが止まるので、離席と同じ扱いになります。
+  staleMs: 2000,
+  calibrationMs: 3000,
+  detectionIntervalMs: 150,
+  timelineBucketSec: 30,
+  breakMinutes: 5,
+  historyMax: 30,
+};
+
+/** localStorage のキー名です。 */
+const STORAGE_KEYS = {
+  totalKoban: "ometsuke.totalKoban",
+  history: "ometsuke.history",
+};
+
+/** 検知状態に応じたお目付け役のせりふです。 */
+const STATUS_TEXT = {
+  focused: "うむ、励んでおるな。",
+  away: "……よそ見をしておらぬか？",
+  missing: "席を外しておるのか？",
+};
+
+// ---- DOM 要素 ----
+
+const el = {
+  screens: {
+    home: document.getElementById("screen-home"),
+    session: document.getElementById("screen-session"),
+    result: document.getElementById("screen-result"),
+    break: document.getElementById("screen-break"),
+  },
+  totalKoban: document.getElementById("total-koban"),
+  historyList: document.getElementById("history-list"),
+  btnStart: document.getElementById("btn-start"),
+  homeError: document.getElementById("home-error"),
+  video: document.getElementById("camera-video"),
+  videoWrapper: document.querySelector(".video-wrapper"),
+  sessionTimer: document.getElementById("session-timer"),
+  sessionOverlay: document.getElementById("session-overlay"),
+  overlayMessage: document.getElementById("overlay-message"),
+  statusMessage: document.getElementById("status-message"),
+  btnAbort: document.getElementById("btn-abort"),
+  resultTitle: document.getElementById("result-title"),
+  resultKoban: document.getElementById("result-koban"),
+  resultComment: document.getElementById("result-comment"),
+  resultRatio: document.getElementById("result-ratio"),
+  resultFocusedTime: document.getElementById("result-focused-time"),
+  timelineBars: document.getElementById("timeline-bars"),
+  btnBreak: document.getElementById("btn-break"),
+  btnHome: document.getElementById("btn-home"),
+  breakTimer: document.getElementById("break-timer"),
+  btnBreakEnd: document.getElementById("btn-break-end"),
+};
+
+// ---- グローバル状態 ----
+
+/** Face Landmarker のインスタンスです。初回セッション開始時に一度だけ生成します。 */
+let faceLandmarker = null;
+
+/** カメラの MediaStream です。セッション終了時に停止します。 */
+let mediaStream = null;
+
+/** 検知ループを止めるためのフラグです。 */
+let detectionRunning = false;
+
+/**
+ * 最新の検知結果です。検知ループが随時上書きし、毎秒の集計処理が参照します。
+ * time は performance.now() 基準、yaw / pitch は度です。
+ */
+let latestDetection = { time: 0, faceFound: false, yaw: 0, pitch: 0 };
+
+/** 進行中セッションの状態です。セッション外では null です。 */
+let session = null;
+
+/** setInterval / setTimeout の ID をまとめて管理し、画面遷移時に確実に止めます。 */
+let timers = [];
+
+// ---- 画面遷移 ----
+
+/**
+ * 指定した画面だけを表示します。
+ *
+ * @param {string} name 表示する画面名 ("home" | "session" | "result" | "break")
+ * @returns {void} 戻り値なし
+ */
+function showScreen(name) {
+  for (const [key, screen] of Object.entries(el.screens)) {
+    screen.hidden = key !== name;
+  }
+}
+
+/**
+ * 登録済みのタイマーをすべて解除します。
+ *
+ * @returns {void} 戻り値なし
+ */
+function clearTimers() {
+  for (const id of timers) {
+    clearInterval(id);
+    clearTimeout(id);
+  }
+  timers = [];
+}
+
+// ---- 永続化 (localStorage) ----
+
+/**
+ * 累計小判枚数を読み込みます。
+ *
+ * @returns {number} 累計小判枚数 (未保存なら 0)
+ */
+function loadTotalKoban() {
+  return Number(localStorage.getItem(STORAGE_KEYS.totalKoban)) || 0;
+}
+
+/**
+ * 累計小判枚数を保存します。
+ *
+ * @param {number} total 保存する累計枚数
+ * @returns {void} 戻り値なし
+ */
+function saveTotalKoban(total) {
+  localStorage.setItem(STORAGE_KEYS.totalKoban, String(total));
+}
+
+/**
+ * セッション履歴を読み込みます。
+ *
+ * @returns {Array<object>} 履歴の配列 (新しい順)。壊れている場合は空配列
+ */
+function loadHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEYS.history) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * セッション履歴の先頭に 1 件追加して保存します。
+ *
+ * @param {object} entry 追加する履歴 (date / durationMin / focusRatio / koban / completed)
+ * @returns {void} 戻り値なし
+ */
+function pushHistory(entry) {
+  const history = [entry, ...loadHistory()].slice(0, CONFIG.historyMax);
+  localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(history));
+}
+
+// ---- ホーム画面の描画 ----
+
+/**
+ * 累計小判と履歴一覧を最新の保存内容で描画し直します。
+ *
+ * @returns {void} 戻り値なし
+ */
+function renderHome() {
+  el.totalKoban.textContent = String(loadTotalKoban());
+
+  const history = loadHistory();
+  el.historyList.innerHTML = "";
+  if (history.length === 0) {
+    const li = document.createElement("li");
+    li.className = "history-empty";
+    li.textContent = "まだ記録がありません。";
+    el.historyList.appendChild(li);
+    return;
+  }
+  for (const entry of history) {
+    const li = document.createElement("li");
+    const date = document.createElement("span");
+    date.className = "history-date";
+    date.textContent = entry.date;
+    const body = document.createElement("span");
+    const ratioText = `${Math.round(entry.focusRatio * 100)}%`;
+    body.textContent = entry.completed
+      ? `${entry.durationMin}分 集中率${ratioText} 🪙+${entry.koban}`
+      : `${entry.durationMin}分 (中断)`;
+    li.append(date, body);
+    el.historyList.appendChild(li);
+  }
+}
+
+// ---- カメラと顔検知 ----
+
+/**
+ * Face Landmarker を初期化します。2 回目以降は生成済みインスタンスを返します。
+ *
+ * @returns {Promise<FaceLandmarker>} 初期化済みの Face Landmarker
+ */
+async function initFaceLandmarker() {
+  if (faceLandmarker) {
+    return faceLandmarker;
+  }
+  const fileset = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  faceLandmarker = await FaceLandmarker.createFromOptions(fileset, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+      delegate: "GPU",
+    },
+    runningMode: "VIDEO",
+    numFaces: 1,
+    // 顔の向き (回転行列) を得るために変換行列の出力を有効にします。
+    outputFacialTransformationMatrixes: true,
+  });
+  return faceLandmarker;
+}
+
+/**
+ * カメラを起動して video 要素に接続します。
+ *
+ * @returns {Promise<void>} 再生開始まで待つ Promise
+ */
+async function startCamera() {
+  mediaStream = await navigator.mediaDevices.getUserMedia({
+    video: { width: 640, height: 480, facingMode: "user" },
+    audio: false,
+  });
+  el.video.srcObject = mediaStream;
+  await new Promise((resolve) => {
+    el.video.onloadedmetadata = () => resolve();
+  });
+}
+
+/**
+ * カメラを停止して video 要素を切り離します。
+ *
+ * @returns {void} 戻り値なし
+ */
+function stopCamera() {
+  if (mediaStream) {
+    for (const track of mediaStream.getTracks()) {
+      track.stop();
+    }
+    mediaStream = null;
+  }
+  el.video.srcObject = null;
+}
+
+/**
+ * 顔の変換行列から顔の向き (ヨー・ピッチ) を求めます。
+ *
+ * 行列は列優先の 4x4 で、第 3 列が顔の正面方向ベクトルです。正面ベクトルの
+ * 水平成分からヨーを、垂直成分からピッチを計算します。符号の向きは環境に
+ * よって揺れるため、絶対値ではなく基準姿勢との差分で使う前提です。
+ *
+ * @param {Float32Array} m 列優先 4x4 の顔変換行列 (長さ 16)
+ * @returns {{yaw: number, pitch: number}} ヨーとピッチ (度)
+ */
+function extractHeadAngles(m) {
+  const fx = m[8];
+  const fy = m[9];
+  const fz = m[10];
+  const yaw = (Math.atan2(fx, fz) * 180) / Math.PI;
+  const pitch = (Math.atan2(fy, Math.hypot(fx, fz)) * 180) / Math.PI;
+  return { yaw, pitch };
+}
+
+/**
+ * 顔検知ループを開始します。requestAnimationFrame で回しつつ、
+ * CONFIG.detectionIntervalMs ごとに間引いて推論します。
+ *
+ * @returns {void} 戻り値なし
+ */
+function startDetectionLoop() {
+  detectionRunning = true;
+  let lastRun = 0;
+
+  const step = () => {
+    if (!detectionRunning) {
+      return;
+    }
+    const now = performance.now();
+    if (now - lastRun >= CONFIG.detectionIntervalMs && el.video.readyState >= 2) {
+      lastRun = now;
+      const result = faceLandmarker.detectForVideo(el.video, now);
+      const matrix = result.facialTransformationMatrixes?.[0]?.data;
+      if (matrix) {
+        const { yaw, pitch } = extractHeadAngles(matrix);
+        latestDetection = { time: now, faceFound: true, yaw, pitch };
+      } else {
+        latestDetection = { time: now, faceFound: false, yaw: 0, pitch: 0 };
+      }
+    }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+/**
+ * 顔検知ループを停止します。
+ *
+ * @returns {void} 戻り値なし
+ */
+function stopDetectionLoop() {
+  detectionRunning = false;
+}
+
+// ---- キャリブレーション ----
+
+/**
+ * 数秒間の顔の向きを平均して基準姿勢を求めます。
+ *
+ * 作業中の自然な姿勢 (手元の本を見る、画面を見るなど) を基準にすることで、
+ * カメラの設置角度や座り方の個人差を吸収します。
+ *
+ * @returns {Promise<{yaw: number, pitch: number}>} 基準姿勢。顔が見つからなければ reject
+ */
+function calibrate() {
+  return new Promise((resolve, reject) => {
+    const samples = [];
+    const started = performance.now();
+
+    const id = setInterval(() => {
+      if (latestDetection.faceFound && latestDetection.time > started) {
+        samples.push({ yaw: latestDetection.yaw, pitch: latestDetection.pitch });
+      }
+      const remaining = Math.ceil((started + CONFIG.calibrationMs - performance.now()) / 1000);
+      el.overlayMessage.textContent = `いつもの作業姿勢のまま、そのまま… (${Math.max(remaining, 0)})`;
+
+      if (performance.now() - started >= CONFIG.calibrationMs) {
+        clearInterval(id);
+        if (samples.length < 5) {
+          reject(new Error("顔が見つかりませんでした。明るさとカメラの向きを確かめてください。"));
+          return;
+        }
+        const avg = (key) => samples.reduce((sum, s) => sum + s[key], 0) / samples.length;
+        resolve({ yaw: avg("yaw"), pitch: avg("pitch") });
+      }
+    }, 100);
+    timers.push(id);
+  });
+}
+
+// ---- セッション本体 ----
+
+/**
+ * 秒数を「m:ss」形式の文字列にします。
+ *
+ * @param {number} totalSec 変換する秒数
+ * @returns {string} 「m:ss」形式の文字列
+ */
+function formatTime(totalSec) {
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${String(sec).padStart(2, "0")}`;
+}
+
+/**
+ * お勤め (作業セッション) を開始します。カメラ・モデルの準備、
+ * キャリブレーション、タイマーと毎秒の集計の起動までを行います。
+ *
+ * @param {number} durationMin セッションの長さ (分)
+ * @returns {Promise<void>} セッションが動き出すまで待つ Promise
+ */
+async function startSession(durationMin) {
+  el.homeError.hidden = true;
+  el.btnStart.disabled = true;
+
+  try {
+    showScreen("session");
+    el.sessionTimer.textContent = formatTime(durationMin * 60);
+    el.statusMessage.textContent = "支度をしています…";
+    el.sessionOverlay.hidden = false;
+    el.overlayMessage.textContent = "カメラとモデルを準備中…";
+
+    await startCamera();
+    await initFaceLandmarker();
+    startDetectionLoop();
+
+    const baseline = await calibrate();
+    el.sessionOverlay.hidden = true;
+
+    session = {
+      durationSec: durationMin * 60,
+      remainingSec: durationMin * 60,
+      focusedSec: 0,
+      totalSec: 0,
+      outZoneMs: 0,
+      baseline,
+      buckets: [{ focused: 0, total: 0 }],
+    };
+
+    const id = setInterval(onSessionTick, 1000);
+    timers.push(id);
+  } catch (err) {
+    cleanupSession();
+    showScreen("home");
+    el.homeError.textContent = `開始できませんでした: ${err.message}`;
+    el.homeError.hidden = false;
+  } finally {
+    el.btnStart.disabled = false;
+  }
+}
+
+/**
+ * 毎秒呼ばれる集計処理です。検知結果から集中判定を行い、
+ * タイマー表示と状態表示を更新します。
+ *
+ * @returns {void} 戻り値なし
+ */
+function onSessionTick() {
+  if (!session) {
+    return;
+  }
+  const now = performance.now();
+
+  // 検知が古い (タブ裏・処理落ち) 場合と顔が無い場合は離席扱いにします。
+  const stale = now - latestDetection.time > CONFIG.staleMs;
+  const faceFound = !stale && latestDetection.faceFound;
+  const inZone =
+    faceFound &&
+    Math.abs(latestDetection.yaw - session.baseline.yaw) <= CONFIG.yawToleranceDeg &&
+    Math.abs(latestDetection.pitch - session.baseline.pitch) <= CONFIG.pitchToleranceDeg;
+
+  // ゾーン外の継続時間を数え、猶予以内なら集中扱いのままにします。
+  session.outZoneMs = inZone ? 0 : session.outZoneMs + 1000;
+  const focused = session.outZoneMs <= CONFIG.graceMs;
+
+  session.totalSec += 1;
+  session.remainingSec -= 1;
+  if (focused) {
+    session.focusedSec += 1;
+  }
+
+  // タイムライン用に 30 秒刻みで集計します。
+  let bucket = session.buckets[session.buckets.length - 1];
+  if (bucket.total >= CONFIG.timelineBucketSec) {
+    bucket = { focused: 0, total: 0 };
+    session.buckets.push(bucket);
+  }
+  bucket.total += 1;
+  if (focused) {
+    bucket.focused += 1;
+  }
+
+  // 表示を更新します。
+  el.sessionTimer.textContent = formatTime(session.remainingSec);
+  const state = !faceFound ? "missing" : inZone ? "focused" : "away";
+  el.videoWrapper.className = `video-wrapper state-${state}`;
+  el.statusMessage.textContent = STATUS_TEXT[state];
+
+  if (session.remainingSec <= 0) {
+    finishSession(true);
+  }
+}
+
+/**
+ * 集中率に応じた小判の枚数を決めます。
+ *
+ * 完走そのものを主報酬 (3 枚) にし、集中率はボーナス扱いです。
+ * スコア稼ぎ競争になりにくくするための設計です。
+ *
+ * @param {number} ratio 集中率 (0〜1)
+ * @returns {number} 授与する小判の枚数
+ */
+function computeReward(ratio) {
+  let koban = 3;
+  if (ratio >= 0.9) {
+    koban += 2;
+  } else if (ratio >= 0.7) {
+    koban += 1;
+  }
+  return koban;
+}
+
+/**
+ * セッションを終了して結果画面を表示します。
+ *
+ * @param {boolean} completed 完走したかどうか (false は中断)
+ * @returns {void} 戻り値なし
+ */
+function finishSession(completed) {
+  const finished = session;
+  cleanupSession();
+  if (!finished) {
+    return;
+  }
+
+  const ratio = finished.totalSec > 0 ? finished.focusedSec / finished.totalSec : 0;
+  const koban = completed ? computeReward(ratio) : 0;
+  const durationMin = Math.round(finished.durationSec / 60);
+
+  saveTotalKoban(loadTotalKoban() + koban);
+  pushHistory({
+    date: new Date().toLocaleDateString("sv-SE"),
+    durationMin,
+    focusRatio: ratio,
+    koban,
+    completed,
+  });
+
+  // 結果画面を組み立てます。
+  el.resultTitle.textContent = completed ? "お勤め、大儀であった。" : "今日はここまでか。";
+  el.resultKoban.textContent = `+${koban}`;
+  el.resultRatio.textContent = `${Math.round(ratio * 100)}%`;
+  el.resultFocusedTime.textContent = formatTime(finished.focusedSec);
+  el.resultComment.textContent = completed
+    ? ratio >= 0.9
+      ? "見事な精進ぶり。褒美を取らせる。"
+      : ratio >= 0.7
+        ? "なかなかの励みであった。"
+        : "完走は立派。次はもう少し落ち着いて参ろう。"
+    : "途中でやめても咎めはせぬ。また参られよ。";
+
+  el.timelineBars.innerHTML = "";
+  for (const bucket of finished.buckets) {
+    if (bucket.total === 0) {
+      continue;
+    }
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const bucketRatio = bucket.focused / bucket.total;
+    bar.style.height = `${Math.max(bucketRatio * 100, 6)}%`;
+    bar.style.opacity = String(0.35 + bucketRatio * 0.65);
+    el.timelineBars.appendChild(bar);
+  }
+
+  showScreen("result");
+}
+
+/**
+ * セッションに関わるリソース (タイマー・検知ループ・カメラ) を後始末します。
+ *
+ * @returns {void} 戻り値なし
+ */
+function cleanupSession() {
+  clearTimers();
+  stopDetectionLoop();
+  stopCamera();
+  el.videoWrapper.className = "video-wrapper";
+  session = null;
+}
+
+// ---- 休憩 ----
+
+/**
+ * 休憩タイマーを開始します。カメラは使いません。
+ *
+ * @returns {void} 戻り値なし
+ */
+function startBreak() {
+  showScreen("break");
+  let remaining = CONFIG.breakMinutes * 60;
+  el.breakTimer.textContent = formatTime(remaining);
+
+  const id = setInterval(() => {
+    remaining -= 1;
+    el.breakTimer.textContent = formatTime(remaining);
+    if (remaining <= 0) {
+      clearInterval(id);
+      renderHome();
+      showScreen("home");
+    }
+  }, 1000);
+  timers.push(id);
+}
+
+// ---- イベント登録と初期化 ----
+
+el.btnStart.addEventListener("click", () => {
+  const checked = document.querySelector('input[name="duration"]:checked');
+  startSession(Number(checked.value));
+});
+
+el.btnAbort.addEventListener("click", () => {
+  if (session) {
+    finishSession(false);
+    return;
+  }
+  // 準備・キャリブレーション中の中断です。startSession 内の await が
+  // 再開しないままになるため、開始ボタンの有効化までここで面倒を見ます。
+  cleanupSession();
+  el.btnStart.disabled = false;
+  renderHome();
+  showScreen("home");
+});
+
+el.btnBreak.addEventListener("click", () => {
+  clearTimers();
+  startBreak();
+});
+
+el.btnHome.addEventListener("click", () => {
+  clearTimers();
+  renderHome();
+  showScreen("home");
+});
+
+el.btnBreakEnd.addEventListener("click", () => {
+  clearTimers();
+  renderHome();
+  showScreen("home");
+});
+
+renderHome();
+showScreen("home");

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OMETSUKE — お目付け役</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1><span class="eye">👁</span> OMETSUKE</h1>
+    <p class="subtitle">お目付け役があなたの精進を見届けます</p>
+  </header>
+
+  <main>
+    <!-- ホーム画面 -->
+    <section id="screen-home" class="screen">
+      <div class="card koban-card">
+        <div class="koban-total">
+          <span class="koban-icon">🪙</span>
+          <span id="total-koban">0</span>
+          <span class="koban-unit">枚</span>
+        </div>
+        <p class="koban-label">これまでに授かった小判</p>
+      </div>
+
+      <div class="card">
+        <h2>お勤めをはじめる</h2>
+        <div class="duration-select" role="radiogroup" aria-label="お勤めの長さ">
+          <label><input type="radio" name="duration" value="15"> 15分</label>
+          <label><input type="radio" name="duration" value="25" checked> 25分</label>
+          <label><input type="radio" name="duration" value="45"> 45分</label>
+        </div>
+        <button id="btn-start" class="btn btn-primary">お勤め開始</button>
+        <p id="home-error" class="error-message" hidden></p>
+        <p class="privacy-note">
+          カメラの映像はすべてこの端末の中だけで処理します。映像の保存・送信は一切しません。
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>これまでのお勤め</h2>
+        <ul id="history-list" class="history-list">
+          <li class="history-empty">まだ記録がありません。</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- セッション画面 (準備・キャリブレーション・作業中を兼用) -->
+    <section id="screen-session" class="screen" hidden>
+      <div class="card session-card">
+        <div id="session-timer" class="session-timer">25:00</div>
+        <div class="video-wrapper">
+          <video id="camera-video" autoplay playsinline muted></video>
+          <div id="session-overlay" class="session-overlay" hidden>
+            <p id="overlay-message"></p>
+          </div>
+        </div>
+        <p id="status-message" class="status-message">支度をしています…</p>
+        <button id="btn-abort" class="btn btn-ghost">お勤めをやめる</button>
+      </div>
+    </section>
+
+    <!-- 結果画面 -->
+    <section id="screen-result" class="screen" hidden>
+      <div class="card result-card">
+        <h2 id="result-title">お勤め、大儀であった。</h2>
+        <div class="result-koban">
+          <span class="koban-icon">🪙</span>
+          <span id="result-koban">+0</span>
+          <span class="koban-unit">枚</span>
+        </div>
+        <p id="result-comment" class="result-comment"></p>
+        <dl class="result-stats">
+          <div><dt>集中率</dt><dd id="result-ratio">—</dd></div>
+          <div><dt>集中していた時間</dt><dd id="result-focused-time">—</dd></div>
+        </dl>
+        <div class="timeline">
+          <p class="timeline-label">お勤めの様子 (30秒ごと)</p>
+          <div id="timeline-bars" class="timeline-bars"></div>
+        </div>
+        <div class="result-actions">
+          <button id="btn-break" class="btn btn-primary">5分の休憩をとる</button>
+          <button id="btn-home" class="btn btn-ghost">ホームへもどる</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 休憩画面 -->
+    <section id="screen-break" class="screen" hidden>
+      <div class="card break-card">
+        <h2>休憩中</h2>
+        <div id="break-timer" class="session-timer">5:00</div>
+        <p class="break-note">お目付け役も一服しています。カメラは止めてあります。</p>
+        <button id="btn-break-end" class="btn btn-ghost">休憩を切り上げる</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p>OMETSUKE プロトタイプ — カメラ映像は端末内でのみ処理されます</p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
