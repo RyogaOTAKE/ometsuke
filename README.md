@@ -30,6 +30,16 @@ python3 -m http.server 8000
 - 映像は端末内でのみ処理し、保存・送信は一切しません。記録 (小判・履歴) は localStorage です。
 - タブを裏に回すと検知が止まり、離席と同じ扱いになります。
 
+## テスト
+
+Playwright + ヘッドレス Chromium + 疑似カメラで、セッション完走までの一連のロジックとエラー フォールバックを検証します。
+
+```bash
+uv venv .venv && uv pip install --python .venv/bin/python playwright
+.venv/bin/playwright install chromium --with-deps
+.venv/bin/python test_app.py
+```
+
 ## 制限 (プロトタイプ)
 
 - モデルと WASM は CDN (jsdelivr / Google) から読み込むため、初回はネットワークが必要です。

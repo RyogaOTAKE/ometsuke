@@ -18,6 +18,12 @@
   box-sizing: border-box;
 }
 
+/* display を指定した要素 (例: .session-overlay の flex) でも hidden 属性を
+   確実に効かせます。author スタイルは UA の [hidden] { display: none } に勝つためです。 */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
