@@ -4,17 +4,26 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OMETSUKE — お目付け役</title>
+  <meta name="description" content="お目付け役が見守るポモドーロ。完走すると小判がもらえます。映像は端末内だけで処理します。">
+  <meta name="theme-color" content="#1f3a5f">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👁</text></svg>">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="app-header">
     <h1><span class="eye">👁</span> OMETSUKE</h1>
-    <p class="subtitle">お目付け役があなたの精進を見届けます</p>
+    <p class="subtitle">お目付け役が、そなたの精進を見届ける</p>
+    <div class="noren" aria-hidden="true"></div>
   </header>
 
   <main>
     <!-- ホーム画面 -->
     <section id="screen-home" class="screen">
+      <div class="card greet-card">
+        <div id="om-home" class="ometsuke" data-mood="idle"></div>
+        <p id="home-speech" class="speech">うむ、来たか。今日も励むかの。</p>
+      </div>
+
       <div class="card koban-card">
         <div class="koban-total">
           <span class="koban-icon">🪙</span>
@@ -27,11 +36,23 @@
       <div class="card">
         <h2>お勤めをはじめる</h2>
         <div class="duration-select" role="radiogroup" aria-label="お勤めの長さ">
-          <label><input type="radio" name="duration" value="15"> 15分</label>
-          <label><input type="radio" name="duration" value="25" checked> 25分</label>
-          <label><input type="radio" name="duration" value="45"> 45分</label>
+          <label>
+            <input type="radio" name="duration" value="15">
+            <span class="duration-min">15分</span>
+            <span class="duration-note">小手調べ</span>
+          </label>
+          <label>
+            <input type="radio" name="duration" value="25" checked>
+            <span class="duration-min">25分</span>
+            <span class="duration-note">ひと勝負</span>
+          </label>
+          <label>
+            <input type="radio" name="duration" value="45">
+            <span class="duration-min">45分</span>
+            <span class="duration-note">腰を据えて</span>
+          </label>
         </div>
-        <button id="btn-start" class="btn btn-primary">お勤め開始</button>
+        <button id="btn-start" class="btn btn-primary">いざ、お勤め</button>
         <p id="home-error" class="error-message" hidden></p>
         <p class="privacy-note">
           カメラの映像はすべてこの端末の中だけで処理します。映像の保存・送信は一切しません。
@@ -50,27 +71,31 @@
     <section id="screen-session" class="screen" hidden>
       <div class="card session-card">
         <div id="session-timer" class="session-timer">25:00</div>
-        <div class="video-wrapper">
-          <video id="camera-video" autoplay playsinline muted></video>
-          <div id="session-overlay" class="session-overlay" hidden>
-            <p id="overlay-message"></p>
+        <div class="watch-row">
+          <div id="om-session" class="ometsuke ometsuke--sm" data-mood="prep"></div>
+          <div class="video-wrapper">
+            <video id="camera-video" autoplay playsinline muted></video>
+            <div id="session-overlay" class="session-overlay" hidden>
+              <p id="overlay-message"></p>
+            </div>
           </div>
         </div>
-        <p id="status-message" class="status-message">支度をしています…</p>
-        <button id="btn-abort" class="btn btn-ghost">お勤めをやめる</button>
+        <p id="status-message" class="speech speech--center">支度をしております…</p>
+        <button id="btn-abort" class="btn btn-ghost">本日はここまで</button>
       </div>
     </section>
 
     <!-- 結果画面 -->
     <section id="screen-result" class="screen" hidden>
       <div class="card result-card">
-        <h2 id="result-title">お勤め、大儀であった。</h2>
+        <div id="om-result" class="ometsuke" data-mood="praise"></div>
+        <h2 id="result-title" class="result-title">お勤め、大儀であった。</h2>
         <div class="result-koban">
           <span class="koban-icon">🪙</span>
           <span id="result-koban">+0</span>
           <span class="koban-unit">枚</span>
         </div>
-        <p id="result-comment" class="result-comment"></p>
+        <p id="result-comment" class="speech speech--center"></p>
         <dl class="result-stats">
           <div><dt>集中率</dt><dd id="result-ratio">—</dd></div>
           <div><dt>集中していた時間</dt><dd id="result-focused-time">—</dd></div>
@@ -89,9 +114,10 @@
     <!-- 休憩画面 -->
     <section id="screen-break" class="screen" hidden>
       <div class="card break-card">
-        <h2>休憩中</h2>
+        <div id="om-break" class="ometsuke" data-mood="rest"></div>
+        <h2>ひと休み</h2>
         <div id="break-timer" class="session-timer">5:00</div>
-        <p class="break-note">お目付け役も一服しています。カメラは止めてあります。</p>
+        <p class="break-note">わしも一服しておる。カメラは止めてあるゆえ、気を抜かれよ。</p>
         <button id="btn-break-end" class="btn btn-ghost">休憩を切り上げる</button>
       </div>
     </section>
@@ -100,6 +126,63 @@
   <footer class="app-footer">
     <p>OMETSUKE プロトタイプ — カメラ映像は端末内でのみ処理されます</p>
   </footer>
+
+  <!--
+    お目付け役の似顔絵です。各画面のプレースホルダ (.ometsuke) に app.js が複製し、
+    data-mood 属性で表情 (眉・目・口・効果) を切り替えます。
+  -->
+  <template id="tpl-ometsuke">
+    <svg class="om" viewBox="0 0 140 150" role="img" aria-hidden="true" focusable="false">
+      <g class="om-figure">
+        <!-- 肩と裃 -->
+        <path class="om-body" d="M18 150 q6-30 52-30 t52 30 z"/>
+        <path class="om-collar" d="M70 120 l-14 9 5 21 h18 l5-21 z"/>
+        <!-- 髷 -->
+        <g class="om-mage">
+          <rect x="63" y="12" width="14" height="24" rx="7"/>
+          <ellipse cx="70" cy="14" rx="11" ry="7"/>
+        </g>
+        <!-- 頭 -->
+        <ellipse class="om-head" cx="70" cy="74" rx="41" ry="39"/>
+        <!-- 月代 (前を剃り上げた髪) -->
+        <path class="om-hair" d="M29 74 a41 39 0 0 1 82 0 q-9-19-41-19 t-41 19z"/>
+        <!-- 眉 -->
+        <rect class="om-brow om-brow--l" x="38" y="62" width="24" height="7" rx="3.5"/>
+        <rect class="om-brow om-brow--r" x="78" y="62" width="24" height="7" rx="3.5"/>
+        <!-- 目 -->
+        <g class="om-eyes">
+          <ellipse class="om-eye" cx="52" cy="79" rx="10" ry="9"/>
+          <ellipse class="om-eye" cx="88" cy="79" rx="10" ry="9"/>
+          <g class="om-pupils">
+            <circle class="om-pupil" cx="52" cy="79" r="4.6"/>
+            <circle class="om-pupil" cx="88" cy="79" r="4.6"/>
+          </g>
+        </g>
+        <!-- 目を閉じた線 (休憩・満足のとき) -->
+        <path class="om-lids" d="M43 79 q9 7 18 0 M79 79 q9 7 18 0"/>
+        <!-- 鼻 -->
+        <path class="om-nose" d="M70 84 q4 8-2 9"/>
+        <!-- 頬 -->
+        <g class="om-blush">
+          <ellipse cx="38" cy="92" rx="7" ry="4.5"/>
+          <ellipse cx="102" cy="92" rx="7" ry="4.5"/>
+        </g>
+        <!-- 口 (表情ごとに 1 つだけ表示します) -->
+        <path class="om-mouth om-mouth--soft" d="M62 100 q8 6 16 0"/>
+        <path class="om-mouth om-mouth--flat" d="M60 101 h20"/>
+        <path class="om-mouth om-mouth--frown" d="M58 105 q12-11 24 0"/>
+        <path class="om-mouth om-mouth--grin" d="M54 98 q16 17 32 0 z"/>
+        <ellipse class="om-mouth om-mouth--oh" cx="70" cy="103" rx="7" ry="8.5"/>
+        <!-- 顎髭 -->
+        <path class="om-beard" d="M64 111 q6 12 12 0 q-6 4-12 0z"/>
+      </g>
+      <!-- 効果 (表情に応じて 1 つだけ表示します) -->
+      <text class="om-fx om-fx--q" x="110" y="42">？</text>
+      <text class="om-fx om-fx--sweat" x="104" y="66">💦</text>
+      <text class="om-fx om-fx--spark" x="4" y="46">✨</text>
+      <text class="om-fx om-fx--tea" x="102" y="138">🍵</text>
+    </svg>
+  </template>
 
   <script type="module" src="app.js"></script>
 </body>
