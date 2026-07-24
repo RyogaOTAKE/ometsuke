@@ -1,17 +1,23 @@
-/* OMETSUKE のスタイルです。和風 (藍色 + 生成り + 金) の配色でまとめています。 */
+/* OMETSUKE のスタイルです。和風 (藍色 + 生成り + 金) を基調に、
+   丸ゴシックと戯画風のお目付け役で、親しみのある雰囲気にまとめています。 */
 
 :root {
-  --color-indigo: #1f3a5f;
+  --color-indigo: #21406b;
   --color-indigo-dark: #16294a;
-  --color-paper: #f6f1e7;
-  --color-card: #fffdf7;
-  --color-gold: #c9a227;
-  --color-text: #2b2b2b;
-  --color-muted: #7a7466;
-  --color-focused: #2e7d32;
-  --color-warn: #b26a00;
-  --color-missing: #b00020;
-  --radius: 14px;
+  --color-paper: #f7f0e2;
+  --color-card: #fffdf6;
+  --color-card-edge: #ebdfc6;
+  --color-gold: #d4a72c;
+  --color-vermilion: #d4573f;
+  --color-text: #3a312a;
+  --color-muted: #8a8172;
+  --color-focused: #3f9142;
+  --color-warn: #d38b16;
+  --color-missing: #c8452f;
+  --radius: 20px;
+  --font-round: "Hiragino Maru Gothic ProN", "Zen Maru Gothic", "Rounded Mplus 1c",
+    "Yu Gothic Medium", "Yu Gothic", "Meiryo", system-ui, sans-serif;
+  --font-brush: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
 }
 
 * {
@@ -26,35 +32,57 @@
 
 body {
   margin: 0;
-  font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
-  background: var(--color-paper);
+  font-family: var(--font-round);
+  background-color: var(--color-paper);
+  /* 和紙のような細かい点の地紋です。 */
+  background-image: radial-gradient(circle at 1px 1px, rgba(33, 64, 107, 0.07) 1px, transparent 0);
+  background-size: 18px 18px;
   color: var(--color-text);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
+/* ---- ヘッダー (暖簾) ---- */
+
 .app-header {
-  background: var(--color-indigo);
+  position: relative;
+  background: linear-gradient(180deg, var(--color-indigo) 0%, var(--color-indigo-dark) 100%);
   color: #fff;
   text-align: center;
-  padding: 20px 16px 14px;
+  padding: 22px 16px 18px;
+  margin-bottom: 12px;
 }
 
 .app-header h1 {
   margin: 0;
-  font-size: 1.6rem;
-  letter-spacing: 0.12em;
+  font-family: var(--font-brush);
+  font-size: 1.7rem;
+  letter-spacing: 0.16em;
 }
 
 .app-header .eye {
+  display: inline-block;
   font-size: 1.3rem;
+  animation: om-wink 6s ease-in-out infinite;
 }
 
 .subtitle {
   margin: 6px 0 0;
   font-size: 0.85rem;
-  opacity: 0.85;
+  color: #f3e6c6;
+}
+
+/* 暖簾の裾をなみなみに切り抜きます。 */
+.noren {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -11px;
+  height: 12px;
+  background: var(--color-indigo-dark);
+  -webkit-mask: radial-gradient(circle 9px at 50% 100%, transparent 98%, #000) 0 0 / 22px 12px repeat-x;
+  mask: radial-gradient(circle 9px at 50% 100%, transparent 98%, #000) 0 0 / 22px 12px repeat-x;
 }
 
 main {
@@ -65,36 +93,318 @@ main {
   padding: 20px 16px 40px;
 }
 
+/* ---- カード ---- */
+
 .card {
   background: var(--color-card);
+  border: 2px solid var(--color-card-edge);
   border-radius: var(--radius);
-  box-shadow: 0 2px 8px rgba(31, 58, 95, 0.10);
+  /* 下にずらした影で、板を重ねたような厚みを出します。 */
+  box-shadow: 0 4px 0 var(--color-card-edge), 0 12px 22px rgba(31, 58, 95, 0.09);
   padding: 20px;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .card h2 {
+  display: inline-block;
   margin: 0 0 14px;
-  font-size: 1.05rem;
-  color: var(--color-indigo);
-  border-left: 4px solid var(--color-gold);
-  padding-left: 10px;
+  padding: 5px 14px;
+  font-size: 1rem;
+  color: #fff;
+  background: var(--color-indigo);
+  border-radius: 999px;
+  box-shadow: 0 2px 0 var(--color-indigo-dark);
+  transform: rotate(-1.2deg);
+}
+
+/* ---- お目付け役 (キャラクター) ---- */
+
+.ometsuke {
+  width: 118px;
+  flex: 0 0 auto;
+}
+
+.ometsuke--sm {
+  width: min(92px, 22vw);
+}
+
+.om {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.om-figure {
+  transform-box: fill-box;
+  transform-origin: 50% 92%;
+  animation: om-bob 3.6s ease-in-out infinite;
+}
+
+.om-body { fill: var(--color-indigo); }
+.om-collar { fill: var(--color-card); stroke: var(--color-indigo-dark); stroke-width: 2; }
+.om-mage,
+.om-hair { fill: #2f2b3a; }
+.om-head { fill: #f8dcbb; stroke: #dfb389; stroke-width: 2; }
+.om-beard { fill: #2f2b3a; }
+
+.om-brow {
+  fill: #2f2b3a;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.25s ease;
+}
+
+.om-eye { fill: #fff; stroke: #2f2b3a; stroke-width: 2; }
+.om-pupil { fill: #2f2b3a; }
+
+.om-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: om-blink 5.4s infinite;
+}
+
+.om-lids {
+  display: none;
+  fill: none;
+  stroke: #2f2b3a;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.om-nose {
+  fill: none;
+  stroke: #cf9a6b;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.om-blush {
+  fill: #ef8b78;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+/* 口は表情ごとに 1 つだけ表示します。 */
+.om-mouth {
+  display: none;
+  fill: none;
+  stroke: #2f2b3a;
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.om-mouth--grin,
+.om-mouth--oh { fill: #a34a44; }
+
+.om-fx {
+  display: none;
+  font-size: 28px;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.om-fx--q {
+  fill: var(--color-vermilion);
+  font-family: var(--font-brush);
+  font-size: 36px;
+  font-weight: bold;
+}
+
+/* 表情ごとの口・目・眉・効果です。 */
+.ometsuke[data-mood="idle"] .om-mouth--soft,
+.ometsuke[data-mood="watch"] .om-mouth--soft,
+.ometsuke[data-mood="gentle"] .om-mouth--soft,
+.ometsuke[data-mood="rest"] .om-mouth--soft,
+.ometsuke[data-mood="prep"] .om-mouth--flat,
+.ometsuke[data-mood="doubt"] .om-mouth--frown,
+.ometsuke[data-mood="search"] .om-mouth--oh,
+.ometsuke[data-mood="praise"] .om-mouth--grin {
+  display: block;
+}
+
+.ometsuke[data-mood="praise"] .om-eyes,
+.ometsuke[data-mood="rest"] .om-eyes { display: none; }
+
+.ometsuke[data-mood="praise"] .om-lids,
+.ometsuke[data-mood="rest"] .om-lids { display: block; }
+
+.ometsuke[data-mood="praise"] .om-blush,
+.ometsuke[data-mood="rest"] .om-blush { opacity: 0.8; }
+
+.ometsuke[data-mood="doubt"] .om-brow--l { transform: rotate(15deg) translateY(3px); }
+.ometsuke[data-mood="doubt"] .om-brow--r { transform: rotate(-15deg) translateY(3px); }
+.ometsuke[data-mood="search"] .om-brow { transform: translateY(-6px); }
+.ometsuke[data-mood="praise"] .om-brow--l { transform: rotate(-9deg) translateY(-3px); }
+.ometsuke[data-mood="praise"] .om-brow--r { transform: rotate(9deg) translateY(-3px); }
+.ometsuke[data-mood="gentle"] .om-brow--l { transform: rotate(-11deg); }
+.ometsuke[data-mood="gentle"] .om-brow--r { transform: rotate(11deg); }
+.ometsuke[data-mood="rest"] .om-brow { transform: translateY(3px); }
+
+.ometsuke[data-mood="watch"] .om-figure { animation: om-nod 2.8s ease-in-out infinite; }
+.ometsuke[data-mood="doubt"] .om-figure { animation: om-tilt 1.7s ease-in-out infinite; }
+.ometsuke[data-mood="search"] .om-figure { animation: om-swivel 2.4s ease-in-out infinite; }
+.ometsuke[data-mood="praise"] .om-figure { animation: om-hop 0.95s ease-in-out infinite; }
+.ometsuke[data-mood="rest"] .om-figure { animation: om-breathe 4.4s ease-in-out infinite; }
+
+.ometsuke[data-mood="search"] .om-pupils { animation: om-glance 2.4s ease-in-out infinite; }
+
+.ometsuke[data-mood="search"] .om-fx--q { display: block; animation: om-float 1.3s ease-in-out infinite; }
+.ometsuke[data-mood="doubt"] .om-fx--sweat { display: block; animation: om-drop 1.6s ease-in-out infinite; }
+.ometsuke[data-mood="praise"] .om-fx--spark { display: block; animation: om-twinkle 1.2s ease-in-out infinite; }
+.ometsuke[data-mood="rest"] .om-fx--tea { display: block; animation: om-float 3.2s ease-in-out infinite; }
+
+@keyframes om-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes om-nod {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-3px) rotate(2.5deg); }
+}
+
+@keyframes om-tilt {
+  0%, 100% { transform: rotate(-4.5deg); }
+  50% { transform: rotate(4.5deg); }
+}
+
+@keyframes om-swivel {
+  0%, 100% { transform: translateX(-5px) rotate(-6deg); }
+  50% { transform: translateX(5px) rotate(6deg); }
+}
+
+@keyframes om-hop {
+  0%, 100% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(-9px) scale(1.04); }
+}
+
+@keyframes om-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+
+@keyframes om-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  94%, 96% { transform: scaleY(0.12); }
+}
+
+@keyframes om-glance {
+  0%, 100% { transform: translateX(-3px); }
+  50% { transform: translateX(3px); }
+}
+
+@keyframes om-float {
+  0%, 100% { transform: translateY(0); opacity: 0.85; }
+  50% { transform: translateY(-6px); opacity: 1; }
+}
+
+@keyframes om-drop {
+  0% { transform: translateY(-3px); opacity: 0; }
+  35% { opacity: 1; }
+  100% { transform: translateY(9px); opacity: 0; }
+}
+
+@keyframes om-twinkle {
+  0%, 100% { transform: scale(0.85) rotate(-10deg); opacity: 0.65; }
+  50% { transform: scale(1.15) rotate(10deg); opacity: 1; }
+}
+
+@keyframes om-wink {
+  0%, 88%, 100% { transform: scaleY(1); }
+  92% { transform: scaleY(0.15); }
+}
+
+/* ---- ふきだし ---- */
+
+.speech {
+  position: relative;
+  flex: 1;
+  margin: 0;
+  padding: 12px 14px;
+  background: #fffaef;
+  border: 2px solid var(--color-indigo);
+  border-radius: 16px;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  min-height: 1.5em;
+}
+
+/* 左向きのしっぽ (キャラクターが左隣にいるとき) です。 */
+.speech::before,
+.speech::after {
+  content: "";
+  position: absolute;
+  top: 20px;
+  border: 8px solid transparent;
+}
+
+.speech::before {
+  left: -16px;
+  border-right-color: var(--color-indigo);
+}
+
+.speech::after {
+  left: -12px;
+  border-right-color: #fffaef;
+}
+
+/* 上向きのしっぽ (キャラクターが真上にいるとき) です。 */
+.speech--center {
+  text-align: center;
+}
+
+.speech--center::before,
+.speech--center::after {
+  top: auto;
+  left: 50%;
+  margin-left: -8px;
+  border-right-color: transparent;
+}
+
+.speech--center::before {
+  bottom: 100%;
+  border-bottom-color: var(--color-indigo);
+}
+
+.speech--center::after {
+  bottom: calc(100% - 4px);
+  border-bottom-color: #fffaef;
 }
 
 /* ---- ホーム画面 ---- */
 
+.greet-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .koban-card {
   text-align: center;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(212, 167, 44, 0.16), transparent 70%),
+    var(--color-card);
 }
 
 .koban-total {
-  font-size: 2.4rem;
+  font-size: 2.6rem;
   font-weight: bold;
   color: var(--color-indigo);
+  font-variant-numeric: tabular-nums;
 }
 
 .koban-icon {
+  display: inline-block;
   margin-right: 4px;
+  animation: koban-wobble 4.5s ease-in-out infinite;
+}
+
+@keyframes koban-wobble {
+  0%, 70%, 100% { transform: rotate(0deg) scale(1); }
+  78% { transform: rotate(-12deg) scale(1.12); }
+  86% { transform: rotate(12deg) scale(1.12); }
 }
 
 .koban-unit {
@@ -111,63 +421,126 @@ main {
 .duration-select {
   display: flex;
   gap: 10px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .duration-select label {
   flex: 1;
-  text-align: center;
-  padding: 10px 0;
-  border: 1.5px solid var(--color-indigo);
-  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 2px;
+  background: #fffaef;
+  border: 2px solid var(--color-card-edge);
+  border-radius: 16px;
   cursor: pointer;
   user-select: none;
+  transition: transform 0.12s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.duration-select label:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-gold);
+}
+
+.duration-min {
+  font-size: 1.02rem;
+  font-weight: bold;
+}
+
+.duration-note {
+  font-size: 0.7rem;
+  color: var(--color-muted);
 }
 
 .duration-select label:has(input:checked) {
   background: var(--color-indigo);
   color: #fff;
+  border-color: var(--color-gold);
+  box-shadow: 0 3px 0 var(--color-indigo-dark);
+}
+
+.duration-select label:has(input:checked) .duration-note {
+  color: #f0dcae;
 }
 
 .duration-select input {
-  display: none;
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
 }
+
+/* キーボード操作でも選択中がわかるようにします。 */
+.duration-select label:has(input:focus-visible) {
+  outline: 3px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+/* ---- ボタン ---- */
 
 .btn {
   display: block;
   width: 100%;
-  padding: 13px 0;
-  font-size: 1rem;
-  border-radius: var(--radius);
+  padding: 14px 0;
+  font-size: 1.02rem;
+  font-weight: bold;
+  font-family: inherit;
+  border-radius: 999px;
   border: none;
   cursor: pointer;
-  font-family: inherit;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.2s ease;
+}
+
+.btn:active {
+  transform: translateY(4px);
 }
 
 .btn-primary {
   background: var(--color-indigo);
   color: #fff;
+  box-shadow: 0 5px 0 var(--color-indigo-dark);
 }
 
 .btn-primary:hover {
-  background: var(--color-indigo-dark);
+  background: #2a4f80;
+}
+
+.btn-primary:active {
+  box-shadow: 0 1px 0 var(--color-indigo-dark);
+}
+
+.btn-primary:disabled {
+  background: #9aa6b6;
+  box-shadow: 0 5px 0 #7f8998;
+  cursor: progress;
 }
 
 .btn-ghost {
-  background: transparent;
+  background: #fffaef;
   color: var(--color-muted);
-  border: 1.5px solid #d8d2c4;
-  margin-top: 10px;
+  border: 2px solid var(--color-card-edge);
+  box-shadow: 0 4px 0 var(--color-card-edge);
+  margin-top: 12px;
 }
 
 .btn-ghost:hover {
+  color: var(--color-text);
   border-color: var(--color-muted);
+}
+
+.btn-ghost:active {
+  box-shadow: 0 1px 0 var(--color-card-edge);
 }
 
 .error-message {
   color: var(--color-missing);
+  background: #fdeeea;
+  border-radius: 12px;
+  padding: 10px 12px;
   font-size: 0.85rem;
-  margin: 10px 0 0;
+  margin: 12px 0 0;
 }
 
 .privacy-note {
@@ -186,8 +559,8 @@ main {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 2px;
-  border-bottom: 1px dashed #e2dccd;
+  padding: 9px 2px;
+  border-bottom: 1px dashed var(--color-card-edge);
   font-size: 0.88rem;
 }
 
@@ -195,10 +568,7 @@ main {
   border-bottom: none;
 }
 
-.history-empty {
-  color: var(--color-muted);
-}
-
+.history-empty,
 .history-date {
   color: var(--color-muted);
 }
@@ -210,20 +580,30 @@ main {
 }
 
 .session-timer {
-  font-size: 3rem;
+  font-size: 3.2rem;
   font-weight: bold;
   color: var(--color-indigo);
   font-variant-numeric: tabular-nums;
-  margin-bottom: 12px;
+  letter-spacing: 0.04em;
+  text-shadow: 0 3px 0 rgba(33, 64, 107, 0.14);
+  margin-bottom: 14px;
+}
+
+.watch-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .video-wrapper {
   position: relative;
-  width: 240px;
-  margin: 0 auto 12px;
-  border-radius: var(--radius);
+  flex: 0 1 auto;
+  width: min(230px, 52vw);
+  border-radius: 18px;
   overflow: hidden;
-  border: 4px solid var(--color-muted);
+  border: 5px solid var(--color-muted);
   transition: border-color 0.4s;
   background: #222;
   aspect-ratio: 4 / 3;
@@ -245,19 +625,14 @@ main {
 .session-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(31, 58, 95, 0.82);
+  background: rgba(31, 58, 95, 0.85);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 12px;
   font-size: 0.9rem;
-}
-
-.status-message {
-  min-height: 1.4em;
-  font-size: 0.95rem;
-  margin: 4px 0 14px;
+  line-height: 1.5;
 }
 
 /* ---- 結果画面 ---- */
@@ -266,35 +641,68 @@ main {
   text-align: center;
 }
 
-.result-koban {
-  font-size: 2.2rem;
-  font-weight: bold;
-  color: var(--color-gold);
-  margin: 10px 0;
+.result-card .ometsuke {
+  margin: 0 auto 4px;
 }
 
-.result-comment {
-  font-size: 0.95rem;
-  margin: 0 0 16px;
+/* お褒めの言葉は木札のような見出しにします (.card h2 の色と影を引き継ぎます)。 */
+.result-title {
+  font-family: var(--font-brush);
+  font-size: 1.15rem;
+  letter-spacing: 0.04em;
+  margin: 0 0 10px;
+}
+
+.result-koban {
+  font-size: 2.4rem;
+  font-weight: bold;
+  color: var(--color-gold);
+  text-shadow: 0 2px 0 rgba(212, 167, 44, 0.28);
+  margin: 6px 0 14px;
+}
+
+/* 結果表示のたびに小判をぽんと跳ねさせます。 */
+.result-koban.pop {
+  animation: koban-pop 0.6s ease-out;
+}
+
+@keyframes koban-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  60% { transform: scale(1.18); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+.result-card .speech--center {
+  display: inline-block;
+  text-align: center;
+  margin-bottom: 18px;
 }
 
 .result-stats {
   display: flex;
   justify-content: center;
-  gap: 30px;
+  gap: 26px;
   margin: 0 0 18px;
 }
 
+.result-stats > div {
+  background: #fffaef;
+  border: 2px solid var(--color-card-edge);
+  border-radius: 14px;
+  padding: 8px 16px;
+}
+
 .result-stats dt {
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   color: var(--color-muted);
 }
 
 .result-stats dd {
-  margin: 4px 0 0;
-  font-size: 1.3rem;
+  margin: 2px 0 0;
+  font-size: 1.35rem;
   font-weight: bold;
   color: var(--color-indigo);
+  font-variant-numeric: tabular-nums;
 }
 
 .timeline-label {
@@ -307,27 +715,32 @@ main {
   display: flex;
   align-items: flex-end;
   gap: 3px;
-  height: 56px;
-  padding: 4px;
-  background: #f0ebdf;
-  border-radius: 8px;
+  height: 58px;
+  padding: 5px;
+  background: #f1ebdd;
+  border-radius: 12px;
+  border: 2px solid var(--color-card-edge);
 }
 
 .timeline-bars .bar {
   flex: 1;
-  background: var(--color-focused);
-  border-radius: 2px 2px 0 0;
+  background: linear-gradient(180deg, var(--color-focused), #79b46a);
+  border-radius: 4px 4px 0 0;
   min-height: 3px;
 }
 
 .result-actions {
-  margin-top: 18px;
+  margin-top: 20px;
 }
 
 /* ---- 休憩画面 ---- */
 
 .break-card {
   text-align: center;
+}
+
+.break-card .ometsuke {
+  margin: 0 auto 14px;
 }
 
 .break-note {
@@ -337,7 +750,18 @@ main {
 
 .app-footer {
   text-align: center;
-  padding: 14px;
+  padding: 16px;
   font-size: 0.72rem;
   color: var(--color-muted);
+}
+
+/* 動きを抑える設定の環境では、アニメーションを止めます。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }

@@ -6,10 +6,11 @@
  * 集中の中身そのものは測れないため、あくまで「作業姿勢の維持度」を測る設計です。
  */
 
-import {
-  FaceLandmarker,
-  FilesetResolver,
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+/**
+ * MediaPipe Tasks Vision の配布元です。お勤めを始めるときに動的に読み込みます。
+ * 静的 import にすると、CDN に届かないときに画面そのものが動かなくなるためです。
+ */
+const TASKS_VISION_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
 /** 動作パラメータをまとめた設定です。しきい値の調整はここだけで済むようにしています。 */
 const CONFIG = {
@@ -34,12 +35,40 @@ const STORAGE_KEYS = {
   history: "ometsuke.history",
 };
 
-/** 検知状態に応じたお目付け役のせりふです。 */
-const STATUS_TEXT = {
-  focused: "うむ、励んでおるな。",
-  away: "……よそ見をしておらぬか？",
-  missing: "席を外しておるのか？",
+/**
+ * 検知状態に応じたお目付け役のせりふです。同じ状態が続くあいだは同じせりふのまま、
+ * 状態が変わったときに 1 つ選び直します (毎秒入れ替わるとうるさいためです)。
+ */
+const STATUS_LINES = {
+  focused: ["うむ、励んでおるな。", "その調子じゃ、そのまま。", "よいよい、しかと見ておる。"],
+  away: ["……よそ見をしておらぬか？", "こら、どこを見ておる。", "気が逸れておるぞ、戻れ戻れ。"],
+  missing: ["席を外しておるのか？", "はて、姿が見えぬが……", "どこへ行った。戻られよ。"],
 };
+
+/** 検知状態と、お目付け役の表情 (data-mood) の対応です。 */
+const STATE_MOOD = {
+  focused: "watch",
+  away: "doubt",
+  missing: "search",
+};
+
+/** ホーム画面でお目付け役が言うあいさつです。 */
+const HOME_LINES = [
+  "うむ、来たか。今日も励むかの。",
+  "支度はよいか。しかと見届けるぞ。",
+  "さて、本日のお勤めはいかほどに？",
+  "よう参った。まずは一勝負といこう。",
+];
+
+/**
+ * 配列から 1 つを無作為に選びます。
+ *
+ * @param {Array<*>} items 選択肢の配列
+ * @returns {*} 選ばれた要素
+ */
+function pickOne(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
 
 // ---- DOM 要素 ----
 
@@ -50,6 +79,13 @@ const el = {
     result: document.getElementById("screen-result"),
     break: document.getElementById("screen-break"),
   },
+  om: {
+    home: document.getElementById("om-home"),
+    session: document.getElementById("om-session"),
+    result: document.getElementById("om-result"),
+    break: document.getElementById("om-break"),
+  },
+  homeSpeech: document.getElementById("home-speech"),
   totalKoban: document.getElementById("total-koban"),
   historyList: document.getElementById("history-list"),
   btnStart: document.getElementById("btn-start"),
@@ -63,6 +99,7 @@ const el = {
   btnAbort: document.getElementById("btn-abort"),
   resultTitle: document.getElementById("result-title"),
   resultKoban: document.getElementById("result-koban"),
+  resultKobanBox: document.querySelector(".result-koban"),
   resultComment: document.getElementById("result-comment"),
   resultRatio: document.getElementById("result-ratio"),
   resultFocusedTime: document.getElementById("result-focused-time"),
@@ -95,6 +132,34 @@ let session = null;
 
 /** setInterval / setTimeout の ID をまとめて管理し、画面遷移時に確実に止めます。 */
 let timers = [];
+
+/** 直前の検知状態です。状態が変わったときだけせりふを選び直すために持ちます。 */
+let lastState = null;
+
+// ---- お目付け役 (キャラクター) ----
+
+/**
+ * テンプレートの似顔絵を各画面のプレースホルダに複製します。
+ *
+ * @returns {void} 戻り値なし
+ */
+function renderMascots() {
+  const template = document.getElementById("tpl-ometsuke");
+  for (const node of Object.values(el.om)) {
+    node.appendChild(template.content.cloneNode(true));
+  }
+}
+
+/**
+ * お目付け役の表情を切り替えます。表情ごとの見た目は CSS 側が持ちます。
+ *
+ * @param {HTMLElement} node 対象の .ometsuke 要素
+ * @param {string} mood 表情名 ("idle" | "prep" | "watch" | "doubt" | "search" | "praise" | "gentle" | "rest")
+ * @returns {void} 戻り値なし
+ */
+function setMood(node, mood) {
+  node.dataset.mood = mood;
+}
 
 // ---- 画面遷移 ----
 
@@ -178,13 +243,15 @@ function pushHistory(entry) {
  */
 function renderHome() {
   el.totalKoban.textContent = String(loadTotalKoban());
+  el.homeSpeech.textContent = pickOne(HOME_LINES);
+  setMood(el.om.home, "idle");
 
   const history = loadHistory();
   el.historyList.innerHTML = "";
   if (history.length === 0) {
     const li = document.createElement("li");
     li.className = "history-empty";
-    li.textContent = "まだ記録がありません。";
+    li.textContent = "まだ記録がありません。まずは一度、励んでみられよ。";
     el.historyList.appendChild(li);
     return;
   }
@@ -208,15 +275,20 @@ function renderHome() {
 /**
  * Face Landmarker を初期化します。2 回目以降は生成済みインスタンスを返します。
  *
- * @returns {Promise<FaceLandmarker>} 初期化済みの Face Landmarker
+ * @returns {Promise<object>} 初期化済みの Face Landmarker
  */
 async function initFaceLandmarker() {
   if (faceLandmarker) {
     return faceLandmarker;
   }
-  const fileset = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
-  );
+  let FaceLandmarker;
+  let FilesetResolver;
+  try {
+    ({ FaceLandmarker, FilesetResolver } = await import(TASKS_VISION_URL));
+  } catch {
+    throw new Error("見守りの仕掛けを取り寄せられませんでした。通信の具合をお確かめくだされ。");
+  }
+  const fileset = await FilesetResolver.forVisionTasks(`${TASKS_VISION_URL}/wasm`);
   faceLandmarker = await FaceLandmarker.createFromOptions(fileset, {
     baseOptions: {
       modelAssetPath:
@@ -341,7 +413,8 @@ function calibrate() {
         samples.push({ yaw: latestDetection.yaw, pitch: latestDetection.pitch });
       }
       const remaining = Math.ceil((started + CONFIG.calibrationMs - performance.now()) / 1000);
-      el.overlayMessage.textContent = `いつもの作業姿勢のまま、そのまま… (${Math.max(remaining, 0)})`;
+      el.overlayMessage.textContent =
+        `その姿勢、しかと覚えるゆえ動くでないぞ… (${Math.max(remaining, 0)})`;
 
       if (performance.now() - started >= CONFIG.calibrationMs) {
         clearInterval(id);
@@ -362,12 +435,15 @@ function calibrate() {
 /**
  * 秒数を「m:ss」形式の文字列にします。
  *
+ * 小数や負の値が渡っても表示が崩れないよう、整数に丸めて 0 で下げ止めます。
+ *
  * @param {number} totalSec 変換する秒数
  * @returns {string} 「m:ss」形式の文字列
  */
 function formatTime(totalSec) {
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
+  const safeSec = Math.max(0, Math.round(totalSec));
+  const min = Math.floor(safeSec / 60);
+  const sec = safeSec % 60;
   return `${min}:${String(sec).padStart(2, "0")}`;
 }
 
@@ -384,10 +460,12 @@ async function startSession(durationMin) {
 
   try {
     showScreen("session");
+    setMood(el.om.session, "prep");
+    lastState = null;
     el.sessionTimer.textContent = formatTime(durationMin * 60);
-    el.statusMessage.textContent = "支度をしています…";
+    el.statusMessage.textContent = "しばし待たれよ。支度をしておる…";
     el.sessionOverlay.hidden = false;
-    el.overlayMessage.textContent = "カメラとモデルを準備中…";
+    el.overlayMessage.textContent = "お目付け役、ただいま参上仕る…";
 
     await startCamera();
     await initFaceLandmarker();
@@ -462,8 +540,13 @@ function onSessionTick() {
   // 表示を更新します。
   el.sessionTimer.textContent = formatTime(session.remainingSec);
   const state = !faceFound ? "missing" : inZone ? "focused" : "away";
-  el.videoWrapper.className = `video-wrapper state-${state}`;
-  el.statusMessage.textContent = STATUS_TEXT[state];
+  el.videoWrapper.classList.remove("state-focused", "state-away", "state-missing");
+  el.videoWrapper.classList.add(`state-${state}`);
+  if (state !== lastState) {
+    lastState = state;
+    setMood(el.om.session, STATE_MOOD[state]);
+    el.statusMessage.textContent = pickOne(STATUS_LINES[state]);
+  }
 
   if (session.remainingSec <= 0) {
     finishSession(true);
@@ -528,6 +611,13 @@ function finishSession(completed) {
         : "完走は立派。次はもう少し落ち着いて参ろう。"
     : "途中でやめても咎めはせぬ。また参られよ。";
 
+  // 完走したときだけ喜ばせ、中断のときは穏やかな顔にします。
+  setMood(el.om.result, completed ? "praise" : "gentle");
+  // アニメーションを付け直すため、いったん外してから再度付けます。
+  el.resultKobanBox.classList.remove("pop");
+  void el.resultKobanBox.offsetWidth;
+  el.resultKobanBox.classList.add("pop");
+
   el.timelineBars.innerHTML = "";
   for (const bucket of finished.buckets) {
     if (bucket.total === 0) {
@@ -553,7 +643,8 @@ function cleanupSession() {
   clearTimers();
   stopDetectionLoop();
   stopCamera();
-  el.videoWrapper.className = "video-wrapper";
+  el.videoWrapper.classList.remove("state-focused", "state-away", "state-missing");
+  lastState = null;
   session = null;
 }
 
@@ -566,6 +657,7 @@ function cleanupSession() {
  */
 function startBreak() {
   showScreen("break");
+  setMood(el.om.break, "rest");
   let remaining = CONFIG.breakMinutes * 60;
   el.breakTimer.textContent = formatTime(remaining);
 
@@ -618,5 +710,6 @@ el.btnBreakEnd.addEventListener("click", () => {
   showScreen("home");
 });
 
+renderMascots();
 renderHome();
 showScreen("home");
