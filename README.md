@@ -40,6 +40,23 @@ uv venv .venv && uv pip install --python .venv/bin/python playwright
 .venv/bin/python test_app.py
 ```
 
+## 公開 (GitHub Pages)
+
+すべて相対パスの静的ページなので、GitHub Pages にそのまま置けます。https 配信のため `getUserMedia` もそのまま動きます。
+
+1. GitHub で公開リポジトリ `ometsuke` を空のまま作成します (README・.gitignore なし)。
+2. Vault リポジトリからこのフォルダだけを履歴つきで切り出して push します。
+
+```bash
+cd <vault リポジトリ>
+git subtree split --prefix=ometsuke -b ometsuke-main
+git push git@github.com:<ユーザー名>/ometsuke.git ometsuke-main:main
+git branch -D ometsuke-main
+```
+
+3. 新リポジトリの Settings → Pages → Source を「Deploy from a branch」、Branch を `main` / `(root)` に設定します。
+4. 数分後に `https://<ユーザー名>.github.io/ometsuke/` で公開されます。
+
 ## 制限 (プロトタイプ)
 
 - モデルと WASM は CDN (jsdelivr / Google) から読み込むため、初回はネットワークが必要です。
