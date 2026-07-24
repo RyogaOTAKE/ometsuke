@@ -1,6 +1,27 @@
 # OMETSUKE — お目付け役
 
-カメラで「作業姿勢の維持度」を見守り、ポモドーロを完走すると小判がもらえるゲーミフィケーション Web アプリのプロトタイプです。
+**▶ 公開ページ: https://ryogaotake.github.io/ometsuke/**
+
+カメラで「作業姿勢の維持度」を見守り、ポモドーロを完走すると小判がもらえるゲーミフィケーション Web アプリです。ビルド不要の静的ページで、GitHub Pages 上でそのまま動きます。
+
+> 映像はすべてブラウザ内 (端末内) で処理します。サーバーへの送信も保存も一切ありません。
+
+## 動作環境
+
+- カメラのある PC + モダンブラウザ (Chrome / Edge / Safari の最新版で確認)
+- カメラの許可。初回アクセス時にブラウザが許可を求めます
+- 初回はモデルと WASM を CDN (jsDelivr / Google) から読み込むためネットワークが必要です
+- スマホ・タブレットは未検証です
+
+## 使い方
+
+1. [公開ページ](https://ryogaotake.github.io/ometsuke/) を開き、カメラを許可します。
+2. お勤めの長さ (15 / 25 / 45 分) を選んで「お勤め開始」。
+3. 3 秒間のキャリブレーション中は、いつもの作業姿勢のままでいてください。この姿勢が「作業ゾーン」の基準になります (手元の本を見る姿勢でも OK)。
+4. セッション中は顔の向きが基準から大きくずれる、または離席すると「よそ見 / 離席」判定になります。3 秒以内に戻れば減点されません。
+5. 完走すると小判 3 枚 + 集中率ボーナス (70% 以上 +1、90% 以上 +2)。中断は 0 枚です。
+
+小判の総数とセッション履歴はブラウザの localStorage に保存されます。同じブラウザで開けば残りますが、別の端末やシークレットウィンドウには引き継がれません。
 
 ## コンセプト
 
@@ -8,27 +29,32 @@
 - カメラで測れるのは集中そのものではなく代理指標 (在席・顔の向き) なので、「集中度」ではなく **作業姿勢の維持度** を測るゲームと割り切っています。
 - スコアはセッション中に見せず、終了後にまとめて表示します (数字稼ぎプレイの防止)。
 
-## 使い方
-
-ビルド不要の静的ページです。`getUserMedia` はセキュアコンテキスト (https または localhost) が必要なので、ローカルサーバー経由で開いてください。
-
-```bash
-cd ometsuke
-python3 -m http.server 8000
-# ブラウザで http://localhost:8000 を開く
-```
-
-1. お勤めの長さ (15 / 25 / 45 分) を選んで「お勤め開始」。
-2. 3 秒間のキャリブレーション中は、いつもの作業姿勢のままでいてください。この姿勢が「作業ゾーン」の基準になります (手元の本を見る姿勢でも OK)。
-3. セッション中は顔の向きが基準から大きくずれる、または離席すると「よそ見 / 離席」判定になります。3 秒以内に戻れば減点されません。
-4. 完走すると小判 3 枚 + 集中率ボーナス (70% 以上 +1、90% 以上 +2)。中断は 0 枚です。
-
 ## 仕組み
 
 - [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) (Tasks Vision, WASM) をブラウザ内で実行します。
 - 顔変換行列から顔の正面ベクトルを取り、ヨー・ピッチのずれ (ヨー ±25°、ピッチ ±20°) で作業ゾーン内かを判定します。
 - 映像は端末内でのみ処理し、保存・送信は一切しません。記録 (小判・履歴) は localStorage です。
 - タブを裏に回すと検知が止まり、離席と同じ扱いになります。
+
+## ファイル構成
+
+| ファイル | 役割 |
+| --- | --- |
+| `index.html` | 画面 (ホーム / セッション / 結果 / 休憩) のマークアップ |
+| `app.js` | 検知・判定・スコア・画面遷移のすべて。しきい値は冒頭の `CONFIG` |
+| `style.css` | スタイル |
+| `test_app.py` | Playwright によるスモークテスト |
+
+## ローカルで動かす
+
+`getUserMedia` はセキュアコンテキスト (https または localhost) が必要なので、ファイルを直接開かずローカルサーバー経由でアクセスしてください。
+
+```bash
+git clone https://github.com/RyogaOTAKE/ometsuke.git
+cd ometsuke
+python3 -m http.server 8000
+# ブラウザで http://localhost:8000 を開く
+```
 
 ## テスト
 
@@ -40,25 +66,14 @@ uv venv .venv && uv pip install --python .venv/bin/python playwright
 .venv/bin/python test_app.py
 ```
 
-## 公開 (GitHub Pages)
+## デプロイ
 
-すべて相対パスの静的ページなので、GitHub Pages にそのまま置けます。https 配信のため `getUserMedia` もそのまま動きます。
+`main` ブランチのルートをそのまま GitHub Pages が配信しています (Settings → Pages → Source: Deploy from a branch, Branch: `main` / `(root)`)。ビルド手順はないので、`main` への push がそのまま公開に反映されます。
 
-1. GitHub で公開リポジトリ `ometsuke` を空のまま作成します (README・.gitignore なし)。
-2. Vault リポジトリからこのフォルダだけを履歴つきで切り出して push します。
+フォークして自分のページとして公開する場合も、同じ設定を有効にするだけで `https://<ユーザー名>.github.io/ometsuke/` から動きます。すべて相対パス参照なので追加の設定は不要です。
 
-```bash
-cd <vault リポジトリ>
-git subtree split --prefix=ometsuke -b ometsuke-main
-git push git@github.com:<ユーザー名>/ometsuke.git ometsuke-main:main
-git branch -D ometsuke-main
-```
+## 制限
 
-3. 新リポジトリの Settings → Pages → Source を「Deploy from a branch」、Branch を `main` / `(root)` に設定します。
-4. 数分後に `https://<ユーザー名>.github.io/ometsuke/` で公開されます。
-
-## 制限 (プロトタイプ)
-
-- モデルと WASM は CDN (jsdelivr / Google) から読み込むため、初回はネットワークが必要です。
-- スマホ・タブレットは未検証です (PC ブラウザ想定)。
-- しきい値は `app.js` 冒頭の `CONFIG` で調整できます。
+- プロトタイプです。しきい値や判定ロジックは調整途中です (`app.js` の `CONFIG` で変更できます)。
+- 顔が検出できない環境 (極端な逆光、カメラ非搭載) では開始できません。
+- 複数人が映り込む場合の挙動は未検証です。
