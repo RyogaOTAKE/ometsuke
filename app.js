@@ -136,6 +136,95 @@ let timers = [];
 /** 直前の検知状態です。状態が変わったときだけせりふを選び直すために持ちます。 */
 let lastState = null;
 
+/** Web Audio の AudioContext です。ユーザー操作をきっかけに生成・再開します。 */
+let audioCtx = null;
+
+/**
+ * テスト用に、直近に鳴らした合図の名前を残します。
+ * 本番の見た目には影響しません。
+ */
+const recentCues = [];
+
+// ---- 音声通知 ----
+
+/**
+ * AudioContext を用意し、停止中なら再開します。
+ * ブラウザの自動再生制限を避けるため、クリックなどのユーザー操作の直後に呼びます。
+ *
+ * @returns {AudioContext|null} 利用可能な AudioContext。未対応環境では null
+ */
+function ensureAudioContext() {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) {
+    return null;
+  }
+  if (!audioCtx) {
+    audioCtx = new Ctx();
+  }
+  if (audioCtx.state === "suspended") {
+    audioCtx.resume().catch(() => {
+      // 再開に失敗してもお勤め自体は続けます。
+    });
+  }
+  return audioCtx;
+}
+
+/**
+ * 短い単音を 1 つ鳴らします。
+ *
+ * @param {AudioContext} ctx 使用する AudioContext
+ * @param {{freq: number, start: number, duration: number, gain?: number, type?: string}} opts 音の設定
+ * @returns {void} 戻り値なし
+ */
+function playTone(ctx, opts) {
+  const gain = opts.gain ?? 0.14;
+  const type = opts.type ?? "sine";
+  const osc = ctx.createOscillator();
+  const amp = ctx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(opts.freq, opts.start);
+  // 無音から急に立ち上げるとクリックノイズになるため、ごく短くフェードします。
+  amp.gain.setValueAtTime(0.0001, opts.start);
+  amp.gain.exponentialRampToValueAtTime(gain, opts.start + 0.02);
+  amp.gain.exponentialRampToValueAtTime(0.0001, opts.start + opts.duration);
+  osc.connect(amp);
+  amp.connect(ctx.destination);
+  osc.start(opts.start);
+  osc.stop(opts.start + opts.duration + 0.05);
+}
+
+/**
+ * お勤めの節目を知らせる合図音を鳴らします。
+ * 画面を隠して作業していても、開始と完走が耳で分かるようにします。
+ *
+ * @param {"start"|"complete"} kind 合図の種類
+ * @returns {void} 戻り値なし
+ */
+function playCue(kind) {
+  recentCues.push(kind);
+  try {
+    const ctx = ensureAudioContext();
+    if (!ctx) {
+      return;
+    }
+    const t = ctx.currentTime + 0.01;
+    if (kind === "start") {
+      // 上がる二音で「はじめ」を知らせます。
+      playTone(ctx, { freq: 523.25, start: t, duration: 0.18, gain: 0.12 });
+      playTone(ctx, { freq: 659.25, start: t + 0.16, duration: 0.28, gain: 0.14 });
+      return;
+    }
+    if (kind === "complete") {
+      // 明るい三音で「完走」を知らせます。
+      playTone(ctx, { freq: 523.25, start: t, duration: 0.15, gain: 0.12 });
+      playTone(ctx, { freq: 659.25, start: t + 0.14, duration: 0.15, gain: 0.13 });
+      playTone(ctx, { freq: 783.99, start: t + 0.28, duration: 0.42, gain: 0.15 });
+    }
+  } catch {
+    // 音声が出せなくてもお勤めの進行は止めません。
+  }
+}
+
 // ---- お目付け役 (キャラクター) ----
 
 /**
@@ -484,6 +573,9 @@ async function startSession(durationMin) {
       buckets: [{ focused: 0, total: 0 }],
     };
 
+    // キャリブレーション直後 = タイマー開始の合図です。画面を隠しても耳で分かります。
+    playCue("start");
+
     const id = setInterval(onSessionTick, 1000);
     timers.push(id);
   } catch (err) {
@@ -589,6 +681,11 @@ function finishSession(completed) {
   const koban = completed ? computeReward(ratio) : 0;
   const durationMin = Math.round(finished.durationSec / 60);
 
+  // 完走したときだけ完了音を鳴らします。中断は静かに結果へ移ります。
+  if (completed) {
+    playCue("complete");
+  }
+
   saveTotalKoban(loadTotalKoban() + koban);
   pushHistory({
     date: new Date().toLocaleDateString("sv-SE"),
@@ -676,9 +773,31 @@ function startBreak() {
 // ---- イベント登録と初期化 ----
 
 el.btnStart.addEventListener("click", () => {
+  // 自動再生制限を避けるため、クリック直後に AudioContext を起こしておきます。
+  ensureAudioContext();
   const checked = document.querySelector('input[name="duration"]:checked');
   startSession(Number(checked.value));
 });
+
+// テストから合図音の発火を確認できるようにします。
+window.__ometsukeTest = {
+  /**
+   * 直近に鳴らした合図の一覧を返します。
+   *
+   * @returns {string[]} 合図名の配列 ("start" / "complete")
+   */
+  getRecentCues() {
+    return [...recentCues];
+  },
+  /**
+   * 記録した合図を空にします。
+   *
+   * @returns {void} 戻り値なし
+   */
+  clearRecentCues() {
+    recentCues.length = 0;
+  },
+};
 
 el.btnAbort.addEventListener("click", () => {
   if (session) {

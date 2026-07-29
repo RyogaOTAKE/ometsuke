@@ -108,7 +108,14 @@ def test_full_session_with_fake_mediapipe(browser):
             radio.checked = true;
         }"""
     )
+    page.evaluate("() => window.__ometsukeTest.clearRecentCues()")
     page.click("#btn-start")
+
+    # キャリブレーション直後に開始音が鳴るまで待ちます。
+    page.wait_for_function(
+        """() => window.__ometsukeTest.getRecentCues().includes("start")""",
+        timeout=15000,
+    )
 
     # キャリブレーション (3 秒) + セッション (3 秒) を経て結果画面に到達します。
     page.wait_for_selector("#screen-result:not([hidden])", timeout=20000)
@@ -116,6 +123,9 @@ def test_full_session_with_fake_mediapipe(browser):
     ratio = page.locator("#result-ratio").inner_text()
     assert koban == "+5", f"報酬が +5 ではありません: {koban}"
     assert ratio == "100%", f"集中率が 100% ではありません: {ratio}"
+
+    cues = page.evaluate("() => window.__ometsukeTest.getRecentCues()")
+    assert cues == ["start", "complete"], f"合図音の順が想定外です: {cues}"
 
     # ホームに戻ると累計と履歴が更新されています。
     page.click("#btn-home")

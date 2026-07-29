@@ -1,0 +1,9 @@
+# OMETSUKE 開発ナレッジ
+
+## 開発中に詰まったポイントと対処
+
+### ブラウザの自動再生制限と合図音
+
+1. **症状**: お勤め完了時に `AudioContext` で音を出そうとしても無音のまま。`audioCtx.state` が `"suspended"` のまま進むことがある。
+2. **原因**: ブラウザはユーザー操作なしでの音声出力を制限する。`AudioContext` は生成直後やタブ復帰後に `suspended` になり、`resume()` かユーザー ジェスチャ起点の生成が必要。
+3. **対処**: 「いざ、お勤め」クリック直後に `ensureAudioContext()` で Context を起こす。`playCue` 内でも `suspended` なら `resume()` を試す。音が出なくてもセッション進行は止めない (`try/catch`)。
