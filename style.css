@@ -543,6 +543,24 @@ main {
   margin: 12px 0 0;
 }
 
+.speech-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 2px 0;
+  font-size: 0.88rem;
+  color: var(--color-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.speech-toggle input {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--color-indigo);
+  cursor: pointer;
+}
+
 .privacy-note {
   margin: 14px 0 0;
   font-size: 0.78rem;

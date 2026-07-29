@@ -33,6 +33,7 @@ const CONFIG = {
 const STORAGE_KEYS = {
   totalKoban: "ometsuke.totalKoban",
   history: "ometsuke.history",
+  speechEnabled: "ometsuke.speechEnabled",
 };
 
 /**
@@ -58,6 +59,19 @@ const HOME_LINES = [
   "支度はよいか。しかと見届けるぞ。",
   "さて、本日のお勤めはいかほどに？",
   "よう参った。まずは一勝負といこう。",
+];
+
+/** キャリブレーション直後、お勤め開始時のせりふです。 */
+const START_LINES = [
+  "うむ、はじめるぞ。励まれよ。",
+  "しかと見届ける。その姿勢のまま参れ。",
+  "よし、時を計る。集中じゃ。",
+];
+
+/** 休憩に入るときのせりふです。 */
+const BREAK_LINES = [
+  "わしも一服しておる。気を抜かれよ。",
+  "ひと休みじゃ。肩の力を抜け。",
 ];
 
 /**
@@ -108,6 +122,7 @@ const el = {
   btnHome: document.getElementById("btn-home"),
   breakTimer: document.getElementById("break-timer"),
   btnBreakEnd: document.getElementById("btn-break-end"),
+  speechToggle: document.getElementById("speech-toggle"),
 };
 
 // ---- グローバル状態 ----
@@ -144,6 +159,21 @@ let audioCtx = null;
  * 本番の見た目には影響しません。
  */
 const recentCues = [];
+
+/**
+ * テスト用に、直近に読み上げたせりふを残します。
+ * 本番の見た目には影響しません。
+ */
+const recentSpeech = [];
+
+/** 日本語向けに選んだ SpeechSynthesisVoice です。voiceschanged 後に入ります。 */
+let preferredVoice = null;
+
+/**
+ * 読み上げ要求の世代番号です。
+ * cancel 直後の speak が握りつぶされる環境向けに、古い予約を無効化します。
+ */
+let speakGeneration = 0;
 
 // ---- 音声通知 ----
 
@@ -223,6 +253,128 @@ function playCue(kind) {
   } catch {
     // 音声が出せなくてもお勤めの進行は止めません。
   }
+}
+
+// ---- せりふの読み上げ (Web Speech API) ----
+
+/**
+ * せりふ読み上げの ON / OFF を読みます。未保存なら ON です。
+ *
+ * @returns {boolean} 読み上げるときは true
+ */
+function isSpeechEnabled() {
+  const saved = localStorage.getItem(STORAGE_KEYS.speechEnabled);
+  if (saved === null) {
+    return true;
+  }
+  return saved === "1";
+}
+
+/**
+ * せりふ読み上げの ON / OFF を保存し、トグル UI に反映します。
+ *
+ * @param {boolean} enabled 読み上げるときは true
+ * @returns {void} 戻り値なし
+ */
+function setSpeechEnabled(enabled) {
+  localStorage.setItem(STORAGE_KEYS.speechEnabled, enabled ? "1" : "0");
+  if (el.speechToggle) {
+    el.speechToggle.checked = enabled;
+  }
+  if (!enabled) {
+    stopSpeaking();
+  }
+}
+
+/**
+ * 利用可能な声から日本語の声を選びます。
+ * getVoices() は環境によって非同期で埋まるため、voiceschanged でも呼びます。
+ *
+ * @returns {void} 戻り値なし
+ */
+function refreshPreferredVoice() {
+  if (!window.speechSynthesis) {
+    preferredVoice = null;
+    return;
+  }
+  const voices = window.speechSynthesis.getVoices();
+  preferredVoice =
+    voices.find((v) => v.lang === "ja-JP" && /male|男|otoya|ichiro|naoki/i.test(v.name)) ||
+    voices.find((v) => v.lang.startsWith("ja")) ||
+    null;
+}
+
+/**
+ * 読み上げ中のせりふを止めます。
+ *
+ * @returns {void} 戻り値なし
+ */
+function stopSpeaking() {
+  speakGeneration += 1;
+  if (!window.speechSynthesis) {
+    return;
+  }
+  try {
+    window.speechSynthesis.cancel();
+  } catch {
+    // 止められなくても進行には影響しません。
+  }
+}
+
+/**
+ * お目付け役のせりふを声に出します。
+ * ブラウザ標準の Speech Synthesis を使い、外部 API や音声ファイルは使いません。
+ *
+ * @param {string} text 読み上げる文言
+ * @returns {void} 戻り値なし
+ */
+function speakLine(text) {
+  const line = String(text || "").trim();
+  if (!line) {
+    return;
+  }
+  recentSpeech.push(line);
+  if (!isSpeechEnabled() || !window.speechSynthesis) {
+    return;
+  }
+  try {
+    // 前のせりふが残っていると重なるため、いったん取り消します。
+    const generation = ++speakGeneration;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(line);
+    utterance.lang = "ja-JP";
+    // 少し低め・控えめにして、お目付け役らしい落ち着きを出します。
+    utterance.rate = 0.95;
+    utterance.pitch = 0.85;
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+    // cancel 直後の speak が無視されるブラウザがあるため、短く間を置きます。
+    setTimeout(() => {
+      if (generation !== speakGeneration || !isSpeechEnabled()) {
+        return;
+      }
+      try {
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        // 読み上げに失敗してもお勤め自体は続けます。
+      }
+    }, 40);
+  } catch {
+    // 読み上げに失敗してもお勤め自体は続けます。
+  }
+}
+
+/**
+ * 画面のせりふを更新し、設定が ON なら同時に読み上げます。
+ *
+ * @param {HTMLElement} node せりふを表示する要素
+ * @param {string} text 表示・読み上げする文言
+ * @returns {void} 戻り値なし
+ */
+function setCharacterSpeech(node, text) {
+  node.textContent = text;
+  speakLine(text);
 }
 
 // ---- お目付け役 (キャラクター) ----
@@ -328,12 +480,21 @@ function pushHistory(entry) {
 /**
  * 累計小判と履歴一覧を最新の保存内容で描画し直します。
  *
+ * @param {{speak?: boolean}} [options] speak が true のとき、あいさつのせりふも読み上げます
  * @returns {void} 戻り値なし
  */
-function renderHome() {
+function renderHome(options = {}) {
   el.totalKoban.textContent = String(loadTotalKoban());
-  el.homeSpeech.textContent = pickOne(HOME_LINES);
+  const greeting = pickOne(HOME_LINES);
+  if (options.speak) {
+    setCharacterSpeech(el.homeSpeech, greeting);
+  } else {
+    el.homeSpeech.textContent = greeting;
+  }
   setMood(el.om.home, "idle");
+  if (el.speechToggle) {
+    el.speechToggle.checked = isSpeechEnabled();
+  }
 
   const history = loadHistory();
   el.historyList.innerHTML = "";
@@ -552,8 +713,9 @@ async function startSession(durationMin) {
     setMood(el.om.session, "prep");
     lastState = null;
     el.sessionTimer.textContent = formatTime(durationMin * 60);
-    el.statusMessage.textContent = "しばし待たれよ。支度をしておる…";
+    setCharacterSpeech(el.statusMessage, "しばし待たれよ。支度をしておる…");
     el.sessionOverlay.hidden = false;
+    // カウントダウン表示は頻繁に変わるため、読み上げず文字だけにします。
     el.overlayMessage.textContent = "お目付け役、ただいま参上仕る…";
 
     await startCamera();
@@ -575,6 +737,10 @@ async function startSession(durationMin) {
 
     // キャリブレーション直後 = タイマー開始の合図です。画面を隠しても耳で分かります。
     playCue("start");
+    setCharacterSpeech(el.statusMessage, pickOne(START_LINES));
+    // 直後の onSessionTick で同じ focused せりふを重ねないよう、開始直後は focused 扱いです。
+    lastState = "focused";
+    setMood(el.om.session, STATE_MOOD.focused);
 
     const id = setInterval(onSessionTick, 1000);
     timers.push(id);
@@ -637,7 +803,7 @@ function onSessionTick() {
   if (state !== lastState) {
     lastState = state;
     setMood(el.om.session, STATE_MOOD[state]);
-    el.statusMessage.textContent = pickOne(STATUS_LINES[state]);
+    setCharacterSpeech(el.statusMessage, pickOne(STATUS_LINES[state]));
   }
 
   if (session.remainingSec <= 0) {
@@ -696,17 +862,21 @@ function finishSession(completed) {
   });
 
   // 結果画面を組み立てます。
-  el.resultTitle.textContent = completed ? "お勤め、大儀であった。" : "今日はここまでか。";
-  el.resultKoban.textContent = `+${koban}`;
-  el.resultRatio.textContent = `${Math.round(ratio * 100)}%`;
-  el.resultFocusedTime.textContent = formatTime(finished.focusedSec);
-  el.resultComment.textContent = completed
+  const title = completed ? "お勤め、大儀であった。" : "今日はここまでか。";
+  const comment = completed
     ? ratio >= 0.9
       ? "見事な精進ぶり。褒美を取らせる。"
       : ratio >= 0.7
         ? "なかなかの励みであった。"
         : "完走は立派。次はもう少し落ち着いて参ろう。"
     : "途中でやめても咎めはせぬ。また参られよ。";
+  el.resultTitle.textContent = title;
+  el.resultKoban.textContent = `+${koban}`;
+  el.resultRatio.textContent = `${Math.round(ratio * 100)}%`;
+  el.resultFocusedTime.textContent = formatTime(finished.focusedSec);
+  el.resultComment.textContent = comment;
+  // 結果のせりふはタイトルと感想を続けて読み、完走を耳でも伝えます。
+  speakLine(`${title} ${comment}`);
 
   // 完走したときだけ喜ばせ、中断のときは穏やかな顔にします。
   setMood(el.om.result, completed ? "praise" : "gentle");
@@ -740,6 +910,7 @@ function cleanupSession() {
   clearTimers();
   stopDetectionLoop();
   stopCamera();
+  stopSpeaking();
   el.videoWrapper.classList.remove("state-focused", "state-away", "state-missing");
   lastState = null;
   session = null;
@@ -755,6 +926,7 @@ function cleanupSession() {
 function startBreak() {
   showScreen("break");
   setMood(el.om.break, "rest");
+  speakLine(pickOne(BREAK_LINES));
   let remaining = CONFIG.breakMinutes * 60;
   el.breakTimer.textContent = formatTime(remaining);
 
@@ -763,7 +935,7 @@ function startBreak() {
     el.breakTimer.textContent = formatTime(remaining);
     if (remaining <= 0) {
       clearInterval(id);
-      renderHome();
+      renderHome({ speak: true });
       showScreen("home");
     }
   }, 1000);
@@ -773,13 +945,26 @@ function startBreak() {
 // ---- イベント登録と初期化 ----
 
 el.btnStart.addEventListener("click", () => {
-  // 自動再生制限を避けるため、クリック直後に AudioContext を起こしておきます。
+  // 自動再生制限を避けるため、クリック直後に AudioContext と声の一覧を起こします。
   ensureAudioContext();
+  refreshPreferredVoice();
   const checked = document.querySelector('input[name="duration"]:checked');
   startSession(Number(checked.value));
 });
 
-// テストから合図音の発火を確認できるようにします。
+if (el.speechToggle) {
+  el.speechToggle.checked = isSpeechEnabled();
+  el.speechToggle.addEventListener("change", () => {
+    setSpeechEnabled(el.speechToggle.checked);
+  });
+}
+
+if (window.speechSynthesis) {
+  refreshPreferredVoice();
+  window.speechSynthesis.addEventListener("voiceschanged", refreshPreferredVoice);
+}
+
+// テストから合図音・読み上げの発火を確認できるようにします。
 window.__ometsukeTest = {
   /**
    * 直近に鳴らした合図の一覧を返します。
@@ -797,6 +982,22 @@ window.__ometsukeTest = {
   clearRecentCues() {
     recentCues.length = 0;
   },
+  /**
+   * 直近に読み上げたせりふの一覧を返します。
+   *
+   * @returns {string[]} せりふの配列
+   */
+  getRecentSpeech() {
+    return [...recentSpeech];
+  },
+  /**
+   * 記録したせりふを空にします。
+   *
+   * @returns {void} 戻り値なし
+   */
+  clearRecentSpeech() {
+    recentSpeech.length = 0;
+  },
 };
 
 el.btnAbort.addEventListener("click", () => {
@@ -808,7 +1009,7 @@ el.btnAbort.addEventListener("click", () => {
   // 再開しないままになるため、開始ボタンの有効化までここで面倒を見ます。
   cleanupSession();
   el.btnStart.disabled = false;
-  renderHome();
+  renderHome({ speak: true });
   showScreen("home");
 });
 
@@ -819,13 +1020,15 @@ el.btnBreak.addEventListener("click", () => {
 
 el.btnHome.addEventListener("click", () => {
   clearTimers();
-  renderHome();
+  stopSpeaking();
+  renderHome({ speak: true });
   showScreen("home");
 });
 
 el.btnBreakEnd.addEventListener("click", () => {
   clearTimers();
-  renderHome();
+  stopSpeaking();
+  renderHome({ speak: true });
   showScreen("home");
 });
 

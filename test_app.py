@@ -108,7 +108,13 @@ def test_full_session_with_fake_mediapipe(browser):
             radio.checked = true;
         }"""
     )
-    page.evaluate("() => window.__ometsukeTest.clearRecentCues()")
+    page.evaluate(
+        """() => {
+            window.__ometsukeTest.clearRecentCues();
+            window.__ometsukeTest.clearRecentSpeech();
+        }"""
+    )
+    assert page.locator("#speech-toggle").is_checked(), "せりふ読み上げが初期 ON ではありません"
     page.click("#btn-start")
 
     # キャリブレーション直後に開始音が鳴るまで待ちます。
@@ -126,6 +132,10 @@ def test_full_session_with_fake_mediapipe(browser):
 
     cues = page.evaluate("() => window.__ometsukeTest.getRecentCues()")
     assert cues == ["start", "complete"], f"合図音の順が想定外です: {cues}"
+
+    speech = page.evaluate("() => window.__ometsukeTest.getRecentSpeech()")
+    assert any("支度をしておる" in line for line in speech), f"準備のせりふがありません: {speech}"
+    assert any("大儀であった" in line for line in speech), f"完走のせりふがありません: {speech}"
 
     # ホームに戻ると累計と履歴が更新されています。
     page.click("#btn-home")

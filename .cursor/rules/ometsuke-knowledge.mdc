@@ -7,3 +7,15 @@
 1. **症状**: お勤め完了時に `AudioContext` で音を出そうとしても無音のまま。`audioCtx.state` が `"suspended"` のまま進むことがある。
 2. **原因**: ブラウザはユーザー操作なしでの音声出力を制限する。`AudioContext` は生成直後やタブ復帰後に `suspended` になり、`resume()` かユーザー ジェスチャ起点の生成が必要。
 3. **対処**: 「いざ、お勤め」クリック直後に `ensureAudioContext()` で Context を起こす。`playCue` 内でも `suspended` なら `resume()` を試す。音が出なくてもセッション進行は止めない (`try/catch`)。
+
+### Web Speech API の cancel 直後 speak が無音になる
+
+1. **症状**: `speechSynthesis.cancel()` の直後に `speak()` しても、せりふが聞こえない (エラーも出ない)。
+2. **原因**: Chromium 系で、cancel 直後の speak が握りつぶされることがある。
+3. **対処**: cancel 後に数十 ms 遅らせて `speak()` する。連打時は世代番号 (`speakGeneration`) で古い予約を破棄する。
+
+### 日本語ボイスは OS / ブラウザ依存
+
+1. **症状**: 環境によって声質や性別が違い、期待した「お目付け役」っぽさにならない。
+2. **原因**: Web Speech API は端末に入っている `SpeechSynthesisVoice` を使うだけで、独自ボイスは同梱できない。
+3. **対処**: `ja-JP` / `ja*` のボイスを優先選択し、なければデフォルトに任せる。声質を固定したい場合は録音アセットや外部 TTS が別途必要。
