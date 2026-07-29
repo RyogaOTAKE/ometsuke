@@ -149,6 +149,64 @@ def test_full_session_with_fake_mediapipe(browser):
     print("OK: フェイク MediaPipe でのセッション完走テスト")
 
 
+def test_background_tab_keeps_detection_scheduler(browser):
+    """裏タブ相当 (document.hidden) でも setInterval 検知に切り替わることを確認します。
+
+    Args:
+        browser: 起動済みの Browser。
+
+    Returns:
+        None。失敗時は AssertionError を送出します。
+    """
+    page = browser.new_page()
+    page.route(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision*",
+        lambda route: route.fulfill(
+            body=FAKE_MEDIAPIPE, content_type="application/javascript"
+        ),
+    )
+    page.goto(BASE_URL)
+    page.evaluate(
+        """() => {
+            const radio = document.querySelector('input[name="duration"][value="15"]');
+            radio.value = "0.2";
+            radio.checked = true;
+        }"""
+    )
+    page.click("#btn-start")
+    page.wait_for_function(
+        """() => window.__ometsukeTest.getRecentCues().includes("start")""",
+        timeout=15000,
+    )
+
+    # 前面のあいだは裏タブ用スケジューラは張られていないはずです。
+    assert not page.evaluate("() => window.__ometsukeTest.isBackgroundDetectionScheduled()")
+
+    # Page Visibility を裏タブ相当にして、setInterval 検知へ切り替わることを見ます。
+    page.evaluate(
+        """() => {
+            Object.defineProperty(document, "hidden", {
+                configurable: true,
+                get: () => true,
+            });
+            document.dispatchEvent(new Event("visibilitychange"));
+        }"""
+    )
+    assert page.evaluate("() => window.__ometsukeTest.isBackgroundDetectionScheduled()"), (
+        "裏タブでも setInterval 検知に切り替わっていません"
+    )
+
+    before = page.evaluate("() => window.__ometsukeTest.getLatestDetectionTime()")
+    page.wait_for_function(
+        """(prev) => window.__ometsukeTest.getLatestDetectionTime() > prev""",
+        arg=before,
+        timeout=5000,
+    )
+
+    page.close()
+    print("OK: 裏タブ時の検知スケジューラ切り替えテスト")
+
+
 def test_real_cdn_no_face(browser):
     """実際の CDN ライブラリで、顔なし映像がエラーで安全に戻ることを検証します。
 
@@ -189,6 +247,7 @@ def main():
         with sync_playwright() as p:
             browser = launch_browser(p)
             test_full_session_with_fake_mediapipe(browser)
+            test_background_tab_keeps_detection_scheduler(browser)
             test_real_cdn_no_face(browser)
             browser.close()
     finally:

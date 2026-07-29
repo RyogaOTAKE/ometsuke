@@ -20,10 +20,14 @@ const CONFIG = {
   // ゾーン外が続いてもすぐ減点しない猶予 (ミリ秒) です。一瞬の首振りで減点しないためです。
   graceMs: 3000,
   // 検知結果がこの時間より古い場合は「検知が止まっている」= ゾーン外として扱います。
-  // タブを裏に回すと検知ループが止まるので、離席と同じ扱いになります。
   staleMs: 2000,
+  // 裏タブではタイマー遅延が起きやすいので、すぐ離席扱いにしない猶予を長めにします。
+  backgroundStaleMs: 5000,
   calibrationMs: 3000,
+  // 前面タブでは rAF で回しつつ、この間隔で推論を間引きます。
   detectionIntervalMs: 150,
+  // 裏タブでは rAF が止まるため setInterval で回します (ブラウザの最低間隔はおおむね 1 秒です)。
+  backgroundDetectionIntervalMs: 1000,
   timelineBucketSec: 30,
   breakMinutes: 5,
   historyMax: 30,
@@ -135,6 +139,15 @@ let mediaStream = null;
 
 /** 検知ループを止めるためのフラグです。 */
 let detectionRunning = false;
+
+/** 前面タブ用 requestAnimationFrame の ID です。 */
+let detectionRafId = 0;
+
+/** 裏タブ用 setInterval の ID です。 */
+let detectionIntervalId = 0;
+
+/** 直前に顔推論を実行した時刻 (performance.now) です。 */
+let detectionLastRun = 0;
 
 /**
  * 最新の検知結果です。検知ループが随時上書きし、毎秒の集計処理が参照します。
@@ -604,34 +617,109 @@ function extractHeadAngles(m) {
 }
 
 /**
- * 顔検知ループを開始します。requestAnimationFrame で回しつつ、
- * CONFIG.detectionIntervalMs ごとに間引いて推論します。
+ * いまの表示状態に応じた検知間隔を返します。
+ *
+ * @returns {number} 推論の最小間隔 (ミリ秒)
+ */
+function currentDetectionIntervalMs() {
+  return document.hidden ? CONFIG.backgroundDetectionIntervalMs : CONFIG.detectionIntervalMs;
+}
+
+/**
+ * いまの表示状態に応じた「検知が古い」判定の閾値を返します。
+ *
+ * @returns {number} 古いとみなす経過時間 (ミリ秒)
+ */
+function currentStaleMs() {
+  return document.hidden ? CONFIG.backgroundStaleMs : CONFIG.staleMs;
+}
+
+/**
+ * video から顔を 1 回だけ推論し、latestDetection を更新します。
+ *
+ * @returns {void} 戻り値なし
+ */
+function runDetectionOnce() {
+  if (!detectionRunning || !faceLandmarker) {
+    return;
+  }
+  if (el.video.readyState < 2) {
+    return;
+  }
+  const now = performance.now();
+  if (now - detectionLastRun < currentDetectionIntervalMs()) {
+    return;
+  }
+  detectionLastRun = now;
+  try {
+    const result = faceLandmarker.detectForVideo(el.video, now);
+    const matrix = result.facialTransformationMatrixes?.[0]?.data;
+    if (matrix) {
+      const { yaw, pitch } = extractHeadAngles(matrix);
+      latestDetection = { time: now, faceFound: true, yaw, pitch };
+    } else {
+      latestDetection = { time: now, faceFound: false, yaw: 0, pitch: 0 };
+    }
+  } catch {
+    // 一時的な推論失敗では直前の結果を残し、次の周期に任せます。
+  }
+}
+
+/**
+ * 前面 / 裏タブ用の検知スケジューラをすべて外します。
+ *
+ * @returns {void} 戻り値なし
+ */
+function clearDetectionSchedulers() {
+  if (detectionRafId) {
+    cancelAnimationFrame(detectionRafId);
+    detectionRafId = 0;
+  }
+  if (detectionIntervalId) {
+    clearInterval(detectionIntervalId);
+    detectionIntervalId = 0;
+  }
+}
+
+/**
+ * タブの表示状態に合わせて検知ループの回し方を選び直します。
+ * 前面は requestAnimationFrame、裏は setInterval です。
+ *
+ * @returns {void} 戻り値なし
+ */
+function scheduleDetectionLoop() {
+  clearDetectionSchedulers();
+  if (!detectionRunning) {
+    return;
+  }
+
+  if (document.hidden) {
+    // 裏タブでは rAF が止まるため、タイマーで検知を続けます。
+    detectionIntervalId = setInterval(runDetectionOnce, CONFIG.backgroundDetectionIntervalMs);
+    runDetectionOnce();
+    return;
+  }
+
+  const step = () => {
+    if (!detectionRunning || document.hidden) {
+      return;
+    }
+    runDetectionOnce();
+    detectionRafId = requestAnimationFrame(step);
+  };
+  detectionRafId = requestAnimationFrame(step);
+}
+
+/**
+ * 顔検知ループを開始します。
+ * 前面タブでは rAF、裏タブでは setInterval で推論します。
  *
  * @returns {void} 戻り値なし
  */
 function startDetectionLoop() {
   detectionRunning = true;
-  let lastRun = 0;
-
-  const step = () => {
-    if (!detectionRunning) {
-      return;
-    }
-    const now = performance.now();
-    if (now - lastRun >= CONFIG.detectionIntervalMs && el.video.readyState >= 2) {
-      lastRun = now;
-      const result = faceLandmarker.detectForVideo(el.video, now);
-      const matrix = result.facialTransformationMatrixes?.[0]?.data;
-      if (matrix) {
-        const { yaw, pitch } = extractHeadAngles(matrix);
-        latestDetection = { time: now, faceFound: true, yaw, pitch };
-      } else {
-        latestDetection = { time: now, faceFound: false, yaw: 0, pitch: 0 };
-      }
-    }
-    requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
+  detectionLastRun = 0;
+  scheduleDetectionLoop();
 }
 
 /**
@@ -641,6 +729,19 @@ function startDetectionLoop() {
  */
 function stopDetectionLoop() {
   detectionRunning = false;
+  clearDetectionSchedulers();
+}
+
+/**
+ * タブの表示 / 非表示が切り替わったときに、検知の回し方を張り直します。
+ *
+ * @returns {void} 戻り値なし
+ */
+function onVisibilityChange() {
+  if (!detectionRunning) {
+    return;
+  }
+  scheduleDetectionLoop();
 }
 
 // ---- キャリブレーション ----
@@ -766,8 +867,9 @@ function onSessionTick() {
   }
   const now = performance.now();
 
-  // 検知が古い (タブ裏・処理落ち) 場合と顔が無い場合は離席扱いにします。
-  const stale = now - latestDetection.time > CONFIG.staleMs;
+  // 検知が古い (処理落ちや、ブラウザが裏タブのタイマーを大きく遅らせた場合) と
+  // 顔が無い場合は離席扱いにします。裏タブ中は閾値を長めに取ります。
+  const stale = now - latestDetection.time > currentStaleMs();
   const faceFound = !stale && latestDetection.faceFound;
   const inZone =
     faceFound &&
@@ -998,7 +1100,25 @@ window.__ometsukeTest = {
   clearRecentSpeech() {
     recentSpeech.length = 0;
   },
+  /**
+   * 最新の顔検知時刻 (performance.now) を返します。
+   *
+   * @returns {number} 検知時刻
+   */
+  getLatestDetectionTime() {
+    return latestDetection.time;
+  },
+  /**
+   * 裏タブ用の setInterval 検知が張られているかを返します。
+   *
+   * @returns {boolean} 裏タブ用スケジューラ動作中なら true
+   */
+  isBackgroundDetectionScheduled() {
+    return detectionIntervalId !== 0;
+  },
 };
+
+document.addEventListener("visibilitychange", onVisibilityChange);
 
 el.btnAbort.addEventListener("click", () => {
   if (session) {

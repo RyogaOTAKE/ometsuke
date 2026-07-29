@@ -37,7 +37,8 @@
 - [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) (Tasks Vision, WASM) をブラウザ内で実行します。
 - 顔変換行列から顔の正面ベクトルを取り、ヨー・ピッチのずれ (ヨー ±25°、ピッチ ±20°) で作業ゾーン内かを判定します。
 - 映像は端末内でのみ処理し、保存・送信は一切しません。記録 (小判・履歴) は localStorage です。
-- タブを裏に回すと検知が止まり、離席と同じ扱いになります。
+- 前面タブでは `requestAnimationFrame`、裏に回したタブでは `setInterval` で顔検知を続けます。タブが選択されていなくても見守りの継続を試みます。
+- ただしブラウザ側の節電により、長く裏に置いたタブではタイマーが大きく間引かれることがあります (環境依存)。OS がカメラを止める場合も検知できません。
 - お勤めの開始 (キャリブレーション直後) と完走は、Web Audio による短い合図音で知らせます。外部の音声ファイルは使いません。
 - せりふの読み上げは Web Speech API (`speechSynthesis`) です。声質は OS / ブラウザに入っている日本語ボイスに依存します。
 
